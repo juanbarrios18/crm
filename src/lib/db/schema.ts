@@ -3,6 +3,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -123,6 +124,19 @@ export const contact = pgTable(
     name: text("name").notNull(),
     notes: text("notes"),
     archivedAt: timestamp("archived_at"),
+    /** 005 — datos comerciales del lead (enriquecimiento por el agente). */
+    empresa: text("empresa"),
+    rubro: text("rubro"),
+    comuna: text("comuna"),
+    rut: text("rut"),
+    razonSocial: text("razon_social"),
+    giro: text("giro"),
+    direccionFacturacion: text("direccion_facturacion"),
+    email: text("email"),
+    frecuenciaDespacho: text("frecuencia_despacho"),
+    volumenSemanal: text("volumen_semanal"),
+    productoInteres: text("producto_interes"),
+    formato: text("formato"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -410,6 +424,9 @@ export const agentTestRun = pgTable(
       .default("running"),
     score: integer("score"),
     error: text("error"),
+    // Modelo del agente y del juez usados en la corrida (Laboratorio).
+    model: text("model"),
+    judgeModel: text("judge_model"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
     finishedAt: timestamp("finished_at"),
   },
@@ -439,6 +456,13 @@ export const agentTestCase = pgTable(
     transcript: jsonb("transcript"),
     veredicto: text("veredicto", { enum: ["verde", "amarillo", "rojo"] }),
     hallazgos: jsonb("hallazgos"),
+    // Tiempos de respuesta del modelo (ms): agente (suma de turnos) y juez.
+    latencyMs: integer("latency_ms"),
+    turnCount: integer("turn_count"),
+    judgeLatencyMs: integer("judge_latency_ms"),
+    // Telemetría por turno del agente: [{model, latencyMs, promptTokens,
+    // completionTokens, cachedTokens, provider}] del intento exitoso.
+    turnMetrics: jsonb("turn_metrics"),
     status: text("status", {
       enum: ["pending", "running", "done", "judge_failed"],
     })
@@ -447,4 +471,89 @@ export const agentTestCase = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("test_case_run_idx").on(t.runId)]
+);
+
+/* ============================================================
+ * 005 — Contexto comercial del negocio
+ * ============================================================ */
+
+/**
+ * Catálogo de venta (PÚBLICO). El costo NO vive acá: vive en product_cost
+ * (tabla separada, consumo interno). La clave del SKU es
+ * (organization_id, producto, masa, formato) → idempotencia del import.
+ */
+export const product = pgTable(
+  "product",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    producto: text("producto").notNull(),
+    masa: text("masa").notNull(),
+    formato: text("formato").notNull(),
+    unidadesPorBolsa: integer("unidades_por_bolsa").notNull(),
+    precioUnitarioNeto: numeric("precio_unitario_neto", { precision: 12, scale: 4 }).notNull(),
+    precioBolsaNeto: numeric("precio_bolsa_neto", { precision: 12, scale: 4 }).notNull(),
+    precioBolsaConIva: numeric("precio_bolsa_con_iva", { precision: 12, scale: 4 }).notNull(),
+    activo: boolean("activo").notNull().default(true),
+    notas: text("notas"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("product_org_sku_uq").on(
+      t.organizationId,
+      t.producto,
+      t.masa,
+      t.formato
+    ),
+    index("product_org_idx").on(t.organizationId),
+  ]
+);
+
+/**
+ * Costo interno del producto (PRIVADO, COGS). 1:1 con product. Ninguna salida
+ * pública (agente comercial, endpoint web) consulta esta tabla — separación
+ * estructural del dato sensible.
+ */
+export const productCost = pgTable(
+  "product_cost",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    costo: numeric("costo", { precision: 12, scale: 4 }),
+    margen: numeric("margen", { precision: 12, scale: 4 }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("product_cost_product_uq").on(t.productId),
+    index("product_cost_org_idx").on(t.organizationId),
+  ]
+);
+
+/** Zona de envío: comuna con cobertura y tarifa PÚBLICA (la paga el cliente). */
+export const deliveryZone = pgTable(
+  "delivery_zone",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    comuna: text("comuna").notNull(),
+    costoDespacho: numeric("costo_despacho", { precision: 12, scale: 4 }),
+    activa: boolean("activa").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("delivery_zone_org_comuna_uq").on(t.organizationId, t.comuna),
+    index("delivery_zone_org_idx").on(t.organizationId),
+  ]
 );

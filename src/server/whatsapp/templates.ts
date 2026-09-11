@@ -10,7 +10,7 @@ import {
   markReconnectRequired,
 } from "@/server/whatsapp/credentials";
 import { callGraphSend, SendError } from "@/server/inbox/send";
-import { serializeMessage } from "@/server/inbox/ingest";
+import { serializeMessage } from "@/server/inbox/serialize";
 import type { WebhookValue } from "@/server/inbox/webhook";
 
 /** Errores tipados del servicio de plantillas → HTTP en la capa de API. */

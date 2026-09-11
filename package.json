@@ -20,7 +20,9 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "seed:demo": "esbuild scripts/seed/demo.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-demo.mjs --alias:@=./src --packages=external && node .tmp-seed-demo.mjs"
+    "seed:demo": "esbuild scripts/seed/demo.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-demo.mjs --alias:@=./src --packages=external && node .tmp-seed-demo.mjs",
+    "seed:products": "esbuild scripts/seed/products.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-products.mjs --alias:@=./src --packages=external && node .tmp-seed-products.mjs",
+    "seed:zones": "esbuild scripts/seed/zones.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-zones.mjs --alias:@=./src --packages=external && node .tmp-seed-zones.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -22,6 +22,27 @@
       "when": 1785872764254,
       "tag": "0002_closed_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788987683502,
+      "tag": "0003_fantastic_johnny_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789023443243,
+      "tag": "0004_productive_havok",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789041094549,
+      "tag": "0005_uneven_gressill",
+      "breakpoints": true
     }
   ]
 }

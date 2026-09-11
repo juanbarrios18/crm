@@ -39,6 +39,11 @@ Thumbs.db
 .claude/settings.local.json
 .playwright-mcp/
 .tmp-seed-demo.mjs
+.tmp-seed-products.mjs
+.tmp-seed-zones.mjs
 .dev-media/
 /openspec
 .atl
+
+# --- CodeGraph: índice local (no compartir) ---
+.codegraph/

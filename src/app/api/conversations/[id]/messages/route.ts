@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { apiError, parseBody, withAuth } from "@/lib/api";
 import { getConversation, listMessages } from "@/server/inbox/queries";
-import { serializeMessage } from "@/server/inbox/ingest";
+import { serializeMessage } from "@/server/inbox/serialize";
 import { SendError, sendStructured, sendText } from "@/server/inbox/send";
 
 export const dynamic = "force-dynamic";

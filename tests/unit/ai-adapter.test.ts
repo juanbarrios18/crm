@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { chatJson, extractJson } from "@/lib/ai";
+import { extractJson } from "@/lib/ai";
+
+// chatJson lee getEnv() que cachea; se importa fresco en cada test de chatJson
+// (los envs cambian entre tests) vía vi.resetModules.
+async function getChatJson() {
+  const mod = await import("@/lib/ai");
+  return mod.chatJson;
+}
 
 describe("extractJson (extracción robusta)", () => {
   it("JSON limpio", () => {
@@ -26,6 +33,7 @@ describe("chatJson (reintentos y errores tipados)", () => {
   const schema = z.object({ action: z.literal("reply"), text: z.string() });
 
   beforeEach(() => {
+    vi.resetModules();
     vi.stubEnv("APP_BASE_URL", "http://localhost:3000");
     vi.stubEnv("DATABASE_URL", "postgresql://t:t@localhost:5432/t");
     vi.stubEnv("BETTER_AUTH_SECRET", "secret-de-test-suficiente");
@@ -42,7 +50,15 @@ describe("chatJson (reintentos y errores tipados)", () => {
 
   function providerResponse(content: string) {
     return new Response(
-      JSON.stringify({ choices: [{ message: { content } }] }),
+      JSON.stringify({
+        choices: [{ message: { content } }],
+        usage: {
+          prompt_tokens: 123,
+          completion_tokens: 7,
+          prompt_tokens_details: { cached_tokens: 100 },
+        },
+        provider: "TestProvider",
+      }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
   }
@@ -54,7 +70,9 @@ describe("chatJson (reintentos y errores tipados)", () => {
       .mockResolvedValueOnce(providerResponse('{"action":"reply","text":"ok"}'));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await chatJson(schema, [{ role: "user", content: "hola" }]);
+    const result = await (await getChatJson())(schema, [
+      { role: "user", content: "hola" },
+    ]);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.text).toBe("ok");
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -71,7 +89,7 @@ describe("chatJson (reintentos y errores tipados)", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await chatJson(schema, [{ role: "user", content: "hola" }]);
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("provider_error");
     expect(fetchMock).toHaveBeenCalledTimes(3); // agotó los 3 intentos
@@ -85,7 +103,7 @@ describe("chatJson (reintentos y errores tipados)", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await chatJson(schema, [{ role: "user", content: "hola" }]);
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("invalid_output");
   });
@@ -95,9 +113,102 @@ describe("chatJson (reintentos y errores tipados)", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await chatJson(schema, [{ role: "user", content: "hola" }]);
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("not_configured");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("devuelve el modelo usado y la latencia en ms del intento exitoso", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [
+      { role: "user", content: "hola" },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.model).toBe("modelo-test");
+      expect(typeof result.latencyMs).toBe("number");
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("expone tokens y provider del intento exitoso", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [
+      { role: "user", content: "hola" },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.usage).toEqual({
+        promptTokens: 123,
+        completionTokens: 7,
+        cachedTokens: 100,
+      });
+      expect(result.provider).toBe("TestProvider");
+    }
+  });
+
+  it("la latencia mide solo el intento exitoso (los fallidos no suman)", async () => {
+    const slowFirst = () =>
+      new Promise<Response>((res) =>
+        setTimeout(() => res(providerResponse("no soy json")), 30)
+      );
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(slowFirst)
+      .mockResolvedValueOnce(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [
+      { role: "user", content: "hola" },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.latencyMs).toBeLessThan(30);
+  });
+
+  it("envía reasoning.effort cuando OPENROUTER_REASONING_EFFORT está definido", async () => {
+    vi.stubEnv("OPENROUTER_REASONING_EFFORT", "medium");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
+    expect(result.ok).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("NO envía reasoning si OPENROUTER_REASONING_EFFORT está vacío", async () => {
+    vi.stubEnv("OPENROUTER_REASONING_EFFORT", "");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
+    expect(result.ok).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.reasoning).toBeUndefined();
+  });
+
+  it("fuerza response_format json_object en el body", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
+    expect(result.ok).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.response_format).toEqual({ type: "json_object" });
   });
 });

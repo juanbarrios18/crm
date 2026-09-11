@@ -37,6 +37,8 @@ export const GET = withAuth(async (session, _req: Request, ctx: Params) => {
       status: run.status,
       score: run.score,
       error: run.error,
+      model: run.model,
+      judgeModel: run.judgeModel,
       startedAt: run.startedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
     },
@@ -48,6 +50,10 @@ export const GET = withAuth(async (session, _req: Request, ctx: Params) => {
       veredicto: c.veredicto,
       hallazgos: c.hallazgos ?? [],
       transcript: c.transcript ?? [],
+      latencyMs: c.latencyMs,
+      turnCount: c.turnCount,
+      turnMetrics: c.turnMetrics ?? [],
+      judgeLatencyMs: c.judgeLatencyMs,
     })),
   });
 });

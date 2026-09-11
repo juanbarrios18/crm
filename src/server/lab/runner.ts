@@ -3,7 +3,9 @@ import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
 import { publish } from "@/server/events/bus";
 import { runAgentTurn } from "@/server/ai/pipeline";
-import { renderKb } from "@/server/ai/prompts";
+import type { ChatTiming } from "@/lib/ai";
+import { renderCatalog, renderDeliveryZones, renderKb } from "@/server/ai/prompts";
+import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { computeScore, judgeCase } from "@/server/lab/judge";
 import { PERSONAS, type Persona } from "@/server/lab/personas";
 
@@ -109,8 +111,17 @@ async function runAllCases(
         .join("\n")
     : "";
 
+  // Ground truth del juez: catálogo público + zonas de envío (FR-030). Sin
+  // esto, el juez tacha de alucinación todo precio/cobertura que el agente
+  // cite correctamente desde el catálogo.
+  const catalogText = renderCatalog(await getActiveProductsPublic(organizationId));
+  const zonesText = renderDeliveryZones(await getActiveZones(organizationId));
+
   let done = 0;
   const total = cases.length;
+  // Modelos usados en la corrida (el primero observado; el entorno es estable).
+  let runAgentModel: string | null = null;
+  let runJudgeModel: string | null = null;
   publishProgress(organizationId, runId, "running", done, total);
 
   for (const testCase of cases) {
@@ -122,17 +133,20 @@ async function runAllCases(
       .set({ status: "running" })
       .where(eq(schema.agentTestCase.id, testCase.id));
 
-    const { transcript, conversationId } = await runConversation(
-      organizationId,
-      persona
-    );
+    const { transcript, conversationId, agentModel, latencyMs, turnCount, turnMetrics } =
+      await runConversation(organizationId, persona);
 
     const outcome = await judgeCase({
       personaKey: persona.key,
       transcript,
       kbText,
       behaviorText,
+      catalogText,
+      zonesText,
     });
+
+    if (agentModel) runAgentModel = agentModel;
+    if (outcome.status === "done") runJudgeModel = outcome.model;
 
     await db
       .update(schema.agentTestCase)
@@ -142,6 +156,10 @@ async function runAllCases(
         status: outcome.status,
         veredicto: outcome.status === "done" ? outcome.verdict.veredicto : null,
         hallazgos: outcome.status === "done" ? outcome.verdict.hallazgos : null,
+        latencyMs,
+        turnCount,
+        turnMetrics,
+        judgeLatencyMs: outcome.status === "done" ? outcome.latencyMs : null,
       })
       .where(eq(schema.agentTestCase.id, testCase.id));
 
@@ -160,7 +178,13 @@ async function runAllCases(
 
   await getDb()
     .update(schema.agentTestRun)
-    .set({ status: "done", score, finishedAt: new Date() })
+    .set({
+      status: "done",
+      score,
+      finishedAt: new Date(),
+      model: runAgentModel,
+      judgeModel: runJudgeModel,
+    })
     .where(eq(schema.agentTestRun.id, runId));
   publishProgress(organizationId, runId, "done", done, total, score);
 }
@@ -172,8 +196,17 @@ async function runConversation(
 ): Promise<{
   transcript: { role: "cliente" | "agente"; text: string }[];
   conversationId: string;
+  agentModel: string | null;
+  latencyMs: number;
+  turnCount: number;
+  turnMetrics: ChatTiming[];
 }> {
   const db = getDb();
+  // Timing acumulado de los turnos REALES del agente en esta conversación.
+  let agentModel: string | null = null;
+  let latencyMs = 0;
+  let turnCount = 0;
+  const turnMetrics: ChatTiming[] = [];
 
   // Contacto sintético ARCHIVADO (no aparece en la lista ni genera leads).
   const contactId = await upsertTestContact(organizationId, persona);
@@ -205,7 +238,13 @@ async function runConversation(
       .where(eq(schema.conversation.id, convId));
 
     // Turno REAL del agente, secuencial y sin debounce (FR-030).
-    await runAgentTurn(convId);
+    const timing = await runAgentTurn(convId);
+    if (timing) {
+      agentModel = timing.model;
+      latencyMs += timing.latencyMs;
+      turnCount += 1;
+      turnMetrics.push(timing);
+    }
 
     const convRows = await db
       .select({ handoffAt: schema.conversation.handoffAt })
@@ -229,6 +268,10 @@ async function runConversation(
         role: m.direction === "in" ? ("cliente" as const) : ("agente" as const),
         text: m.text!,
       })),
+    agentModel,
+    latencyMs,
+    turnCount,
+    turnMetrics,
   };
 }
 

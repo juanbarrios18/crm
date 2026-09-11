@@ -17,6 +17,10 @@ vi.mock("@/lib/ai", () => ({
     ok: true,
     data: { action: "reply", text: "respuesta simulada" },
     raw: "{}",
+    model: "modelo-test",
+    latencyMs: 250,
+    usage: { promptTokens: 2100, completionTokens: 80, cachedTokens: 1900 },
+    provider: "DeepInfra",
   }),
 }));
 
@@ -110,9 +114,18 @@ describe("sandbox del Laboratorio en el pipeline del agente", () => {
     );
 
     const { runAgentTurn } = await import("@/server/ai/pipeline");
-    await runAgentTurn("cv_lab");
+    const timing = await runAgentTurn("cv_lab");
 
     expect(graphRequest).not.toHaveBeenCalled();
+    // expone el modelo, latencia, tokens y provider del turno (telemetría)
+    expect(timing).toEqual({
+      model: "modelo-test",
+      latencyMs: 250,
+      promptTokens: 2100,
+      completionTokens: 80,
+      cachedTokens: 1900,
+      provider: "DeepInfra",
+    });
     // la respuesta quedó persistida como mensaje saliente ai_generated
     const messageInsert = inserts.find(
       (i) =>

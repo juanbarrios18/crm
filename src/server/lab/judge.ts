@@ -19,7 +19,13 @@ export const Verdict = z.object({
 export type VerdictType = z.infer<typeof Verdict>;
 
 export type JudgeOutcome =
-  | { status: "done"; verdict: VerdictType }
+  | {
+      status: "done";
+      verdict: VerdictType;
+      /** Modelo y latencia del juez (Laboratorio). */
+      model: string;
+      latencyMs: number;
+    }
   | { status: "judge_failed"; detail: string };
 
 /**
@@ -32,12 +38,16 @@ export async function judgeCase(input: {
   transcript: { role: "cliente" | "agente"; text: string }[];
   kbText: string;
   behaviorText: string;
+  catalogText: string;
+  zonesText: string;
 }): Promise<JudgeOutcome> {
   const { system, user } = buildJudgePrompt({
     persona: input.personaKey,
     transcript: input.transcript,
     kbText: input.kbText,
     behaviorText: input.behaviorText,
+    catalogText: input.catalogText,
+    zonesText: input.zonesText,
   });
   const result = await chatJson(
     Verdict,
@@ -55,7 +65,12 @@ export async function judgeCase(input: {
     );
     return { status: "judge_failed", detail: result.detail };
   }
-  return { status: "done", verdict: result.data };
+  return {
+    status: "done",
+    verdict: result.data,
+    model: result.model,
+    latencyMs: result.latencyMs,
+  };
 }
 
 /**

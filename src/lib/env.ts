@@ -26,9 +26,19 @@ const envSchema = z.object({
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api"),
   OPENROUTER_MODEL: z.string().optional(),
   OPENROUTER_JUDGE_MODEL: z.string().optional(),
+  // Nivel de razonamiento del modelo ("low" | "medium" | "high"), si el modelo
+  // lo soporta (p. ej. nvidia/nemotron-3-ultra acepta medium/high). Vacío/ausente
+  // → usa el default del proveedor. Se manda en el body como `reasoning`/`reasoning_effort`.
+  OPENROUTER_REASONING_EFFORT: z
+    .enum(["low", "medium", "high"])
+    .optional(),
   ALLOW_SIGNUP: z.string().optional(),
   AGENT_COALESCE_MS: z.coerce.number().int().min(0).default(6000),
   WA_MOCK_ENABLED: z.string().optional(),
+  // Gate de adjuntos entrantes (008): por defecto los archivos adjuntos de
+  // WhatsApp se ignoran y se responde un aviso. `true` re-habilita el
+  // procesamiento completo (descarga + almacenamiento).
+  WA_INBOUND_MEDIA_ENABLED: z.string().optional(),
   // API key de un cerebro externo que conduzca la conversación por /api/bot/*.
   // Sin ella, toda esa superficie responde 401.
   BOT_API_KEY: z.string().optional(),
@@ -91,4 +101,13 @@ export function isMockEnabled(): boolean {
 export function isAiConfigured(): boolean {
   const token = process.env.OPENROUTER_API_TOKEN;
   return typeof token === "string" && token.trim().length > 0;
+}
+
+/**
+ * true si el procesamiento de adjuntos entrantes de WhatsApp está habilitado.
+ * Por defecto (ausente/vacío/false) los adjuntos entrantes se ignoran y se
+ * responde un aviso de "no soportados".
+ */
+export function isInboundMediaEnabled(): boolean {
+  return process.env.WA_INBOUND_MEDIA_ENABLED === "true";
 }
