@@ -5,14 +5,23 @@ import { z } from "zod";
  * El servidor valida cada acción contra sus allowlists (etapas de la org);
  * lo que no valida se degrada, nunca se ejecuta a ciegas.
  */
+/**
+ * Etapa objetivo del lead: campo INDEPENDIENTE de la acción, presente en toda
+ * respuesta. El modelo clasifica el estado comercial en cada turno sin competir
+ * con la elección de acción (con `move_stage` como acción única, el modelo
+ * elegía `reply` y el lead nunca se movía).
+ */
+const stageField = { stage: z.string().min(1).optional() };
+
 export const AgentAction = z
   .discriminatedUnion("action", [
-    z.object({ action: z.literal("none") }),
-    z.object({ action: z.literal("reply"), text: z.string().min(1) }),
+    z.object({ action: z.literal("none"), ...stageField }),
+    z.object({ action: z.literal("reply"), text: z.string().min(1), ...stageField }),
     z.object({
       action: z.literal("update_lead"),
       note: z.string().min(1).optional(),
       reply: z.string().optional(),
+      ...stageField,
       // 005 — campos comerciales estructurados del lead (último valor gana).
       empresa: z.string().min(1).max(200).optional(),
       rubro: z.string().min(1).max(200).optional(),
@@ -36,6 +45,7 @@ export const AgentAction = z
       action: z.literal("handoff"),
       reason: z.string().optional(),
       farewell: z.string().optional(),
+      ...stageField,
     }),
   ])
   .superRefine((val, ctx) => {
@@ -66,8 +76,33 @@ export const AgentAction = z
 export type AgentActionType = z.infer<typeof AgentAction>;
 
 /**
+ * Normaliza un nombre de etapa para comparar: sin tildes, minúsculas, sin
+ * espacios sobrantes. El modelo suele devolver variaciones ("Interesados",
+ * "EN CONVERSACIÓN", "en conversacion") que no deben fallar la resolución.
+ */
+function normalizeStageName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    // Quita anotaciones que el modelo copia del prompt: "(ganado)", "[perdido]".
+    .replace(/[([{][^)\]}]*[)\]}]+/g, " ")
+    // Quita el sufijo de tipo suelto: "cliente - ganado", "cliente — perdido".
+    .replace(/\s*[-–—]\s*(ganado|perdido|won|lost)\s*$/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Tolerancia de plural simple en español: "interesados" → "interesado". */
+function singularize(value: string): string {
+  return value.endsWith("s") ? value.slice(0, -1) : value;
+}
+
+/**
  * Resuelve el nombre de etapa devuelto por el modelo contra las etapas reales
- * de la organización (exacto → lower-case). Sin match: degradar a reply/none.
+ * de la organización: exacto → normalizado (sin tildes/case/espacios) →
+ * singular/plural. Sin match: degradar a reply/none (nunca mover a ciegas).
  */
 export function resolveStage(
   requested: string,
@@ -75,8 +110,16 @@ export function resolveStage(
 ): { id: string; name: string } | null {
   const exact = stages.find((s) => s.name === requested.trim());
   if (exact) return exact;
-  const lower = requested.trim().toLowerCase();
-  return stages.find((s) => s.name.toLowerCase() === lower) ?? null;
+  const target = normalizeStageName(requested);
+  if (!target) return null;
+  const normalized = stages.find((s) => normalizeStageName(s.name) === target);
+  if (normalized) return normalized;
+  const targetSingular = singularize(target);
+  return (
+    stages.find(
+      (s) => singularize(normalizeStageName(s.name)) === targetSingular
+    ) ?? null
+  );
 }
 
 /** Degrada una move_stage sin etapa válida (FR-021 / contrato ai.md). */

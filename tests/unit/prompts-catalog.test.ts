@@ -112,4 +112,16 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain("CATÁLOGO DE PRODUCTOS");
     expect(prompt).not.toContain("ZONAS DE ENVÍO");
   });
+
+  it("instruye a mover de etapa con el campo stage y nombres EXACTOS", () => {
+    const prompt = build();
+    for (const stage of STAGES) {
+      expect(prompt).toContain(stage.name);
+    }
+    expect(prompt).toContain('"stage"');
+    expect(prompt).toContain("Etapa actual del lead");
+    expect(prompt.toLowerCase()).toContain("nombre exacto");
+    // Regresión: el prompt no debe hardcodear una etapa fuera de la lista.
+    expect(prompt).not.toContain("interesados");
+  });
 });

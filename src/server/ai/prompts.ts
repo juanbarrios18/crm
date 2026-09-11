@@ -82,12 +82,19 @@ export function renderKb(entries: KbEntry[]): string {
 export function buildAgentSystemPrompt(input: {
   profile: AgentProfile;
   kb: KbEntry[];
-  stages: { name: string }[];
+  stages: { name: string; kind?: string }[];
+  currentStage?: string | null;
   catalog?: PublicProduct[];
   zones?: { comuna: string; costoDespacho: number | null }[];
 }): string {
   const { profile } = input;
-  const stageNames = input.stages.map((s) => s.name).join(" | ");
+  const stageList = input.stages
+    .map((s, i) => {
+      const tag =
+        s.kind === "won" ? " (ganado)" : s.kind === "lost" ? " (perdido)" : "";
+      return `${i + 1}. ${s.name}${tag}`;
+    })
+    .join(" · ");
   return [
     `Eres "${profile.name}", el asistente de WhatsApp de este negocio. Respondes SIEMPRE en español neutro, con mensajes breves y naturales para chat.`,
     profile.tone ? `Tono: ${profile.tone}` : null,
@@ -103,19 +110,24 @@ export function buildAgentSystemPrompt(input: {
     input.zones && input.zones.length > 0
       ? `ZONAS DE ENVÍO (cobertura y costo de despacho al cliente):\n${renderDeliveryZones(input.zones)}`
       : null,
-    `Etapas del pipeline disponibles: ${stageNames}`,
+    `Etapas del pipeline (en orden): ${stageList}`,
+    `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
     [
-      "En cada turno respondes ÚNICAMENTE un objeto JSON con UNA acción:",
-      '- {"action":"none"} — no responder nada.',
-      '- {"action":"reply","text":"..."} — responder al cliente.',
-      '- {"action":"update_lead","note":"...","reply":"..."} — guardar una nota del lead (reply opcional).',
-      '- {"action":"update_lead","empresa":"...","comuna":"...","reply":"..."} — guardar o actualizar un campo comercial del lead (empresa, rubro, comuna, rut, razon_social, giro, direccion_facturacion, email, frecuencia_despacho, volumen_semanal, producto_interes, formato). Puede combinarse con note.',
-      '- {"action":"move_stage","stage":"<nombre exacto de etapa>","reply":"..."} — mover el lead (reply opcional).',
-      '- {"action":"handoff","reason":"...","farewell":"..."} — escalar a un humano (farewell opcional para despedirte).',
+      "En cada turno respondes ÚNICAMENTE un objeto JSON con la acción y la etapa del lead:",
+      '- {"action":"none","stage":"<etapa>"} — no responder nada.',
+      '- {"action":"reply","text":"...","stage":"<etapa>"} — responder al cliente.',
+      '- {"action":"update_lead","note":"...","reply":"...","stage":"<etapa>"} — guardar una nota del lead (reply opcional).',
+      '- {"action":"update_lead","empresa":"...","comuna":"...","reply":"...","stage":"<etapa>"} — guardar o actualizar un campo comercial del lead (empresa, rubro, comuna, rut, razon_social, giro, direccion_facturacion, email, frecuencia_despacho, volumen_semanal, producto_interes, formato). Puede combinarse con note.',
+      '- {"action":"handoff","reason":"...","farewell":"...","stage":"<etapa>"} — escalar a un humano (farewell opcional para despedirte).',
+      'El campo "stage" va SIEMPRE y usa el nombre EXACTO de una etapa de la lista de arriba. Escribí SOLO el nombre, sin la anotación entre paréntesis (ej.: "Cliente", nunca "Cliente (ganado)").',
+      "Reglas de la etapa (importante):",
+      "- El lead arranca en la primera etapa. Avanzá de etapa cuando el cliente avance en el proceso de compra.",
+      "- Señal clara de avance (el cliente dice que quiere comprar, pide pagar/transferir o confirma el pedido) → avanzá ese mismo turno a la etapa abierta que represente interés; no te quedes en la etapa inicial.",
+      "- No retrocedas de etapa: si no hay avance, repetí la etapa actual.",
+      "- Usá la etapa marcada (ganado) solo cuando el cliente confirme la compra o el pago, y (perdido) si declina.",
       "Reglas duras:",
       "- Si el cliente pide hablar con una persona/humano/asesor → handoff.",
       "- Si la pregunta NO está cubierta por el conocimiento ni el catálogo → NO inventes: responde que lo confirmarás o escala.",
-      "- Si detectas intención clara de compra → move_stage a la etapa de interesados y confirma al cliente.",
       "Formato de tus mensajes (obligatorio):",
       "- Máximo 2-3 líneas. WhatsApp no es un email.",
       "- Un mensaje = UNA acción + MÁXIMO una pregunta. Nunca apiles dos preguntas.",

@@ -140,10 +140,24 @@ export async function runAgentTurn(
     .where(eq(schema.kbEntry.organizationId, organizationId))
     .orderBy(asc(schema.kbEntry.createdAt));
   const stages = await db
-    .select({ id: schema.pipelineStage.id, name: schema.pipelineStage.name })
+    .select({
+      id: schema.pipelineStage.id,
+      name: schema.pipelineStage.name,
+      position: schema.pipelineStage.position,
+      kind: schema.pipelineStage.kind,
+    })
     .from(schema.pipelineStage)
     .where(eq(schema.pipelineStage.organizationId, organizationId))
     .orderBy(asc(schema.pipelineStage.position));
+
+  // Etapa actual del lead: se inyecta en el prompt y evita retrocesos.
+  const leadRows = await db
+    .select({ stageId: schema.lead.stageId })
+    .from(schema.lead)
+    .where(eq(schema.lead.contactId, conversation.contactId))
+    .limit(1);
+  const currentStageId = leadRows[0]?.stageId ?? null;
+  const currentStage = stages.find((s) => s.id === currentStageId) ?? null;
 
   // 005 — contexto comercial: catálogo público + zonas de envío (NUNCA el costo).
   const catalog = await getActiveProductsPublic(organizationId);
@@ -152,7 +166,14 @@ export async function runAgentTurn(
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: buildAgentSystemPrompt({ profile, kb, stages, catalog, zones }),
+      content: buildAgentSystemPrompt({
+        profile,
+        kb,
+        stages,
+        currentStage: currentStage?.name ?? null,
+        catalog,
+        zones,
+      }),
     },
     ...history
       .filter((m) => m.text)
@@ -183,21 +204,40 @@ export async function runAgentTurn(
 
   let action: AgentActionType = result.data;
 
-  if (action.action === "move_stage") {
-    const stage = resolveStage(action.stage, stages);
-    if (!stage) {
-      action = degradeAction(action);
+  // Etapa objetivo: el modelo la emite como campo independiente en CUALQUIER
+  // acción (no compite con la elección de reply/move_stage). Se resuelve contra
+  // las etapas reales y solo avanza (nunca retrocede ni sale de ganado/perdido).
+  if (action.stage) {
+    const target = resolveStage(action.stage, stages);
+    if (!target) {
+      console.warn(
+        `[agente] etapa inexistente "${action.stage}" — ` +
+          `disponibles: ${stages.map((s) => s.name).join(", ")}.`
+      );
+      if (action.action === "move_stage") action = degradeAction(action);
     } else {
-      await moveLeadToStage(organizationId, conversation.contactId, stage.id);
-      publish(organizationId, {
-        type: "conversation.updated",
-        data: { conversation: { id: conversationId } },
-      });
-      if (action.reply) {
-        await deliverReply(conversation, action.reply);
+      const targetMeta = stages.find((s) => s.id === target.id);
+      const canAdvance =
+        currentStage === null ||
+        (currentStage.kind !== "won" &&
+          currentStage.kind !== "lost" &&
+          targetMeta !== undefined &&
+          targetMeta.position > currentStage.position);
+      if (canAdvance && target.id !== currentStageId) {
+        await moveLeadToStage(organizationId, conversation.contactId, target.id);
+        publish(organizationId, {
+          type: "conversation.updated",
+          data: { conversation: { id: conversationId } },
+        });
       }
-      return timing;
     }
+  }
+
+  if (action.action === "move_stage") {
+    if (action.reply) {
+      await deliverReply(conversation, action.reply);
+    }
+    return timing;
   }
 
   switch (action.action) {
