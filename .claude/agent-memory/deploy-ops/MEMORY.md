@@ -4,3 +4,5 @@ Una línea por memoria: - [Título](archivo.md) — gancho de una línea.
 Vacío al inicio; el subagente lo irá poblando (IDs de la plataforma, modos de
 fallo recurrentes del deploy, comando de migración, healthcheck, etc.).
 -->
+
+- [Deploy producción Hetzner (Lamas Foods)](production-hetzner.md) — build off-VM → save|ssh load → compose up -d; nunca buildear en el VPS.
