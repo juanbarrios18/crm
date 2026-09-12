@@ -1,0 +1,113 @@
+# ============================================================
+# Vocero CRM — Build + deploy automático al VPS al mergear a main
+#
+# Reproduce el runbook de docs/deploy-hetzner.md:
+#  1. Gate: typecheck + lint + tests (Definition of Done)
+#  2. Build de la imagen FUERA del VPS (el VPS no aguanta `next build`)
+#  3. Transferencia por SSH con `docker save | docker load`
+#  4. `docker compose up -d` (las migraciones corren al boot del contenedor)
+#  5. Verificación del healthcheck
+#
+# Secrets necesarios (Settings → Secrets and variables → Actions):
+#   VPS_HOST        → 91.98.92.59
+#   VPS_USER        → root
+#   VPS_PATH        → /opt/vocero
+#   VPS_SSH_KEY     → contenido de ~/.ssh/id_ed25519_oracle
+#   VPS_PORT        → 22 (opcional)
+#   VPS_KNOWN_HOSTS → línea de host key del VPS (opcional; si no está, se
+#                     obtiene con ssh-keyscan al vuelo)
+# ============================================================
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Gate (typecheck + lint + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Test
+        run: pnpm test
+
+  deploy:
+    name: Build and deploy to VPS
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          SHORT_SHA=${{ github.sha[0:7] }}
+          docker build -t vocero-crm:latest -t "vocero-crm:sha-${SHORT_SHA}" .
+
+      - name: Set up SSH key
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Trust VPS host key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "$VPS_KNOWN_HOSTS" ]; then
+            echo "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+
+      - name: Load image on VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          docker save vocero-crm:latest | ssh -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" docker load
+
+      - name: Recreate stack
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PATH: ${{ secrets.VPS_PATH }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "cd '$VPS_PATH' && docker compose up -d"
+
+      - name: Verify health
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
+            'docker ps --format "{{.Names}}\t{{.Status}}" && docker exec vocero-app-1 wget -q -O - http://127.0.0.1:3000/api/health'

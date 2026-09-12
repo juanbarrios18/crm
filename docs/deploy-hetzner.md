@@ -4,6 +4,28 @@ Runbook de la instancia productiva. **Regla de oro: la imagen se buildea
 FUERA del VPS** y se transfiere con `docker save | ssh ... docker load`. El VPS
 tiene 4 GB de RAM y `next build` lo tumba (pico de memoria).
 
+## Deploy automático (CI)
+
+Al **mergear a `main`**, GitHub Actions (`.github/workflows/deploy.yml`) corre
+el gate (`typecheck` + `lint` + `test`), buildea la imagen en el runner y la
+despliega por SSH al VPS (mismo mecanismo `docker save | docker load` del
+runbook manual). El deploy solo se ejecuta si el gate pasa.
+
+Secrets requeridos en GitHub (Settings → Secrets and variables → Actions):
+
+| Secret | Valor |
+|---|---|
+| `VPS_HOST` | `91.98.92.59` |
+| `VPS_USER` | `root` |
+| `VPS_PATH` | `/opt/vocero` |
+| `VPS_SSH_KEY` | contenido de `~/.ssh/id_ed25519_oracle` |
+| `VPS_PORT` | `22` (opcional) |
+| `VPS_KNOWN_HOSTS` | host key del VPS (opcional; sin él se usa `ssh-keyscan`) |
+
+La imagen se carga con doble tag: `vocero-crm:latest` y
+`vocero-crm:sha-<commit>`. Los tags `sha-*` quedan en el VPS y habilitan el
+rollback sin rebuild (ver abajo).
+
 ## Destino
 
 | Dato | Valor |
@@ -15,10 +37,11 @@ tiene 4 GB de RAM y `next build` lo tumba (pico de memoria).
 | Imagen | `vocero-crm:latest` (tag local = tag en VPS) |
 | Stack | `vocero-app-1` + `vocero-postgres-1` + `vocero-caddy-1` |
 
-## Runbook de redeploy
+## Runbook de redeploy manual (fallback)
 
-Desde el repo local (`/home/juanbarrios18/Development/crm`), con los cambios ya
-en el working tree:
+El flujo normal es el CI automático. Este runbook solo aplica si el CI no está
+disponible o querés desplegar sin pushear a `main`. Desde el repo local
+(`/home/juanbarrios18/Development/crm`), con los cambios ya en el working tree:
 
 ```bash
 # 1. Build local (multi-stage; los secretos NO van en build)
@@ -55,8 +78,18 @@ y el id de imagen local == VPS.
 
 ## Rollback
 
-Como el deploy es por tag mutable, el rollback es volver a cargar la imagen
-anterior (si se conservó el tar) o rebuildear desde el commit bueno:
+El CI deja en el VPS los tags `vocero-crm:sha-<commit>` de cada deploy. Para
+volver a un commit bueno sin rebuild:
+
+```bash
+ssh vocero 'docker images vocero-crm --format "{{.Tag}}\t{{.ID}}\t{{.Size}}"'
+
+# volver al commit bueno (tag sha-... que quedó en el VPS)
+ssh vocero 'cd /opt/vocero && docker tag vocero-crm:sha-<commit-bueno> vocero-crm:latest && docker compose up -d'
+```
+
+Como el deploy es por tag mutable, el rollback manual (sin CI) es rebuildear
+desde el commit bueno:
 
 ```bash
 git checkout <commit-bueno>
