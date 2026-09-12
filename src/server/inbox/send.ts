@@ -9,7 +9,7 @@ import {
   type Credentials,
 } from "@/server/whatsapp/credentials";
 import { isWindowOpen } from "@/server/inbox/window";
-import { serializeMessage } from "@/server/inbox/ingest";
+import { serializeMessage } from "@/server/inbox/serialize";
 import {
   saveMediaFile,
   uploadGraphMedia,

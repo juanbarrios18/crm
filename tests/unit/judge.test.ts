@@ -7,23 +7,32 @@ vi.mock("@/lib/ai", () => ({
 }));
 
 import { computeScore, judgeCase } from "@/server/lab/judge";
+import { buildJudgePrompt } from "@/server/ai/prompts";
 
 describe("judgeCase (FR-032)", () => {
   beforeEach(() => chatJson.mockReset());
 
-  it("veredicto válido → done", async () => {
+  it("veredicto válido → done con modelo y latencia del juez", async () => {
     chatJson.mockResolvedValue({
       ok: true,
       data: { veredicto: "verde", hallazgos: [] },
       raw: "{}",
+      model: "juez-test",
+      latencyMs: 432,
     });
     const outcome = await judgeCase({
       personaKey: "comprador_decidido",
       transcript: [{ role: "cliente", text: "hola" }],
       kbText: "kb",
       behaviorText: "b",
+      catalogText: "cat",
+      zonesText: "zones",
     });
     expect(outcome.status).toBe("done");
+    if (outcome.status === "done") {
+      expect(outcome.model).toBe("juez-test");
+      expect(outcome.latencyMs).toBe(432);
+    }
     // usa el modelo del juez (opts.judge)
     expect(chatJson.mock.calls[0]![2]).toMatchObject({ judge: true });
   });
@@ -39,8 +48,52 @@ describe("judgeCase (FR-032)", () => {
       transcript: [],
       kbText: "",
       behaviorText: "",
+      catalogText: "",
+      zonesText: "",
     });
     expect(outcome.status).toBe("judge_failed");
+  });
+});
+
+describe("buildJudgePrompt (ground truth del juez)", () => {
+  it("incluye catálogo y zonas como fuente de verdad", () => {
+    const { user } = buildJudgePrompt({
+      persona: "comprador_decidido",
+      transcript: [],
+      kbText: "",
+      behaviorText: "",
+      catalogText: "Pan de hamburguesa — $2.220 neto",
+      zonesText: "Macul: $5.000 de despacho",
+    });
+    expect(user).toContain("CATÁLOGO DE PRODUCTOS");
+    expect(user).toContain("$2.220 neto");
+    expect(user).toContain("ZONAS DE ENVÍO");
+    expect(user).toContain("Macul");
+  });
+
+  it("instruye que precio/comuna del catálogo NO es alucinación", () => {
+    const { system } = buildJudgePrompt({
+      persona: "comprador_decidido",
+      transcript: [],
+      kbText: "",
+      behaviorText: "",
+      catalogText: "",
+      zonesText: "",
+    });
+    expect(system).toContain("NO es alucinación");
+  });
+
+  it("instruye marcar afirmaciones sin evidencia (acciones no verificables)", () => {
+    const { system } = buildJudgePrompt({
+      persona: "reclama_no_recibido",
+      transcript: [],
+      kbText: "",
+      behaviorText: "",
+      catalogText: "",
+      zonesText: "",
+    });
+    expect(system).toContain("afirmacion_sin_evidencia");
+    expect(system).toContain("NO puede verificar");
   });
 });
 

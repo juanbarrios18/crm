@@ -26,13 +26,21 @@ type Run = {
   status: "running" | "done" | "failed";
   score: number | null;
   error: string | null;
+  model: string | null;
+  judgeModel: string | null;
   startedAt: string;
   finishedAt: string | null;
   delta: number | null;
 };
 
 type Hallazgo = {
-  tipo: "alucinacion" | "fuera_de_kb" | "debio_escalar" | "tono";
+  tipo:
+    | "alucinacion"
+    | "fuera_de_kb"
+    | "debio_escalar"
+    | "tono"
+    | "afirmacion_sin_evidencia"
+    | "pipeline";
   evidencia: string;
   sugerencia?: { pregunta: string; respuesta: string };
 };
@@ -45,13 +53,38 @@ type Case = {
   veredicto: "verde" | "amarillo" | "rojo" | null;
   hallazgos: Hallazgo[];
   transcript: { role: "cliente" | "agente"; text: string }[];
+  latencyMs: number | null;
+  turnCount: number | null;
+  judgeLatencyMs: number | null;
+  turnMetrics: TurnMetric[];
+  initialStage: string | null;
+  finalStage: string | null;
+  expectAdvance: boolean | null;
+  advanced: boolean | null;
 };
+
+type TurnMetric = {
+  model: string;
+  latencyMs: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  cachedTokens: number | null;
+  provider: string | null;
+};
+
+/** Formatea una latencia en ms a un texto corto (s con un decimal o ms). */
+function formatMs(ms: number | null | undefined): string {
+  if (ms == null) return "—";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`;
+}
 
 const TIPO_LABELS: Record<Hallazgo["tipo"], string> = {
   alucinacion: "Alucinación",
   fuera_de_kb: "Fuera del conocimiento",
   debio_escalar: "Debió escalar",
   tono: "Tono",
+  afirmacion_sin_evidencia: "Afirmación sin evidencia",
+  pipeline: "Pipeline (no avanzó)",
 };
 
 export function LabClient() {
@@ -264,6 +297,14 @@ function HistoryList({
               minute: "2-digit",
             })}
           </p>
+          {run.model && (
+            <p
+              className="mt-0.5 truncate text-[11px] text-muted-foreground"
+              title={run.model}
+            >
+              {run.model}
+            </p>
+          )}
         </button>
       ))}
     </div>
@@ -278,6 +319,17 @@ function ScoreBadge({ run }: { run: Run }) {
   return <Badge variant={variant}>Score {score}</Badge>;
 }
 
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border p-2">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 truncate font-medium" title={value}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
 function Report({
   detail,
   onApplied,
@@ -286,6 +338,11 @@ function Report({
   onApplied: () => void;
 }) {
   const { run, cases } = detail;
+  const measured = cases.filter((c) => (c.turnCount ?? 0) > 0);
+  const totalTurns = measured.reduce((acc, c) => acc + (c.turnCount ?? 0), 0);
+  const totalLatency = measured.reduce((acc, c) => acc + (c.latencyMs ?? 0), 0);
+  const avgLatency =
+    totalTurns > 0 ? Math.round(totalLatency / totalTurns) : null;
   return (
     <div className="space-y-4">
       <Card>
@@ -313,6 +370,12 @@ function Report({
                 </div>
               ))}
             </div>
+            <dl className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+              <Stat label="Modelo agente" value={run.model ?? "—"} />
+              <Stat label="Modelo juez" value={run.judgeModel ?? "—"} />
+              <Stat label="Respuesta prom. (agente)" value={formatMs(avgLatency)} />
+              <Stat label="Tiempo total agente" value={formatMs(totalLatency)} />
+            </dl>
             {cases.some((c) => c.status === "judge_failed") && (
               <p className="mt-3 text-xs text-[#8a6d3b]">
                 {cases.filter((c) => c.status === "judge_failed").length} caso(s) sin
@@ -333,6 +396,10 @@ function Report({
 function CaseCard({ testCase, onApplied }: { testCase: Case; onApplied: () => void }) {
   const [open, setOpen] = useState(false);
   const c = testCase;
+  const avgTurn =
+    c.turnCount && c.turnCount > 0 && c.latencyMs != null
+      ? Math.round(c.latencyMs / c.turnCount)
+      : null;
   const icon =
     c.veredicto === "verde" ? (
       <CheckCircle2 className="h-4 w-4 text-success" />
@@ -369,13 +436,50 @@ function CaseCard({ testCase, onApplied }: { testCase: Case; onApplied: () => vo
           {c.hallazgos.map((h, i) => (
             <HallazgoCard key={i} hallazgo={h} caseId={c.id} index={i} onApplied={onApplied} />
           ))}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>Respuesta prom.: {formatMs(avgTurn)}</span>
+            <span>
+              Total agente: {formatMs(c.latencyMs)} · {c.turnCount ?? 0} turno(s)
+            </span>
+            <span>Juez: {formatMs(c.judgeLatencyMs)}</span>
+            {(c.initialStage || c.finalStage) && (
+              <span>
+                Pipeline: {c.initialStage ?? "—"} → {c.finalStage ?? "—"}
+                {c.expectAdvance
+                  ? c.advanced
+                    ? " · avanzó ✓"
+                    : " · NO avanzó ✗"
+                  : ""}
+              </span>
+            )}
+          </div>
+          {c.turnMetrics.length > 0 && (
+            <div className="space-y-1 rounded-md border bg-background/40 p-2 text-[11px] text-muted-foreground">
+              {c.turnMetrics.map((t, i) => (
+                <p key={i}>
+                  <span className="font-medium text-foreground">Turno {i + 1}:</span>{" "}
+                  {formatMs(t.latencyMs)}
+                  {t.promptTokens != null && (
+                    <>
+                      {" · "}
+                      {t.promptTokens}/{t.completionTokens ?? "?"} tok
+                      {t.cachedTokens != null && t.cachedTokens > 0
+                        ? ` (${t.cachedTokens} cache)`
+                        : ""}
+                    </>
+                  )}
+                  {t.provider && <> · {t.provider}</>}
+                </p>
+              ))}
+            </div>
+          )}
           <div className="rounded-md border bg-background/40 p-3">
             <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Transcript
             </p>
             <div className="space-y-1.5 text-sm">
               {c.transcript.map((t, i) => (
-                <p key={i}>
+                <p key={i} className="whitespace-pre-line">
                   <span
                     className={
                       t.role === "cliente" ? "text-[#5b7291]" : "text-primary"

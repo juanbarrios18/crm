@@ -13,9 +13,34 @@ export type ChatMessage = {
   content: string;
 };
 
+/** Tokens reportados por el proveedor en el intento exitoso. */
+export type ChatUsage = {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  cachedTokens: number | null;
+};
+
 export type ChatJsonResult<T> =
-  | { ok: true; data: T; raw: string }
+  | {
+      ok: true;
+      data: T;
+      raw: string;
+      model: string;
+      latencyMs: number;
+      usage: ChatUsage | null;
+      provider: string | null;
+    }
   | { ok: false; error: "not_configured" | "provider_error" | "invalid_output"; detail: string };
+
+/** Métricas de un turno exitoso del modelo (telemetría del Laboratorio). */
+export type ChatTiming = {
+  model: string;
+  latencyMs: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  cachedTokens: number | null;
+  provider: string | null;
+};
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 500;
@@ -59,21 +84,27 @@ export async function chatJson<T>(
                 "STRICT: tu respuesta anterior no fue JSON válido según el esquema. Responde ÚNICAMENTE el objeto JSON, sin explicaciones ni markdown.",
             },
           ];
+    const startedAt = Date.now();
     try {
-      const raw = await callProvider(model, attemptMessages, opts?.timeoutMs);
-      const extracted = extractJson(raw);
+      const { content, usage, provider } = await callProvider(
+        model,
+        attemptMessages,
+        opts?.timeoutMs
+      );
+      const latencyMs = Date.now() - startedAt;
+      const extracted = extractJson(content);
       if (extracted === null) {
-        lastDetail = `sin JSON extraíble (raw=${truncate(raw)})`;
+        lastDetail = `sin JSON extraíble (raw=${truncate(content)})`;
         continue;
       }
       const parsed = schema.safeParse(extracted);
       if (!parsed.success) {
         lastDetail = `no cumple el esquema: ${parsed.error.issues
           .map((i) => i.path.join(".") + " " + i.message)
-          .join("; ")} (raw=${truncate(raw)})`;
+          .join("; ")} (raw=${truncate(content)})`;
         continue;
       }
-      return { ok: true, data: parsed.data, raw };
+      return { ok: true, data: parsed.data, raw: content, model, latencyMs, usage, provider };
     } catch (err) {
       lastDetail = err instanceof Error ? err.message : String(err);
       if (attempt < MAX_ATTEMPTS) {
@@ -95,10 +126,23 @@ async function callProvider(
   model: string,
   messages: ChatMessage[],
   timeoutMs = 60_000
-): Promise<string> {
+): Promise<{ content: string; usage: ChatUsage | null; provider: string | null }> {
   const env = getEnv();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // 006: nivel de razonamiento configurable por entorno, si el modelo lo soporta.
+  const reasoningEffort = env.OPENROUTER_REASONING_EFFORT;
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    // 020: modo JSON estricto. Sin esto, modelos chicos (gemini-flash-lite)
+    // devuelven texto plano y chatJson no puede extraer la acción → el turno
+    // falla con "sin JSON extraíble". chatJson siempre quiere JSON.
+    response_format: { type: "json_object" },
+  };
+  if (reasoningEffort) {
+    body.reasoning = { effort: reasoningEffort };
+  }
   try {
     const res = await fetch(`${env.OPENROUTER_BASE_URL}/v1/chat/completions`, {
       method: "POST",
@@ -107,7 +151,7 @@ async function callProvider(
         Authorization: `Bearer ${env.OPENROUTER_API_TOKEN}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model, messages }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -116,12 +160,25 @@ async function callProvider(
     }
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+      };
+      provider?: string;
     };
     const content = json.choices?.[0]?.message?.content;
     if (typeof content !== "string" || content.length === 0) {
       throw new Error("respuesta del proveedor sin contenido");
     }
-    return content;
+    const usage: ChatUsage | null = json.usage
+      ? {
+          promptTokens: json.usage.prompt_tokens ?? null,
+          completionTokens: json.usage.completion_tokens ?? null,
+          cachedTokens: json.usage.prompt_tokens_details?.cached_tokens ?? null,
+        }
+      : null;
+    return { content, usage, provider: json.provider ?? null };
   } finally {
     clearTimeout(timer);
   }

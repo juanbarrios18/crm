@@ -26,6 +26,8 @@ export const GET = withAuth(async (session) => {
       status: run.status,
       score: run.score,
       error: run.error,
+      model: run.model,
+      judgeModel: run.judgeModel,
       startedAt: run.startedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
       delta:

@@ -69,6 +69,11 @@ async function main() {
     process.exit(1);
   }
 
+  // Gate de adjuntos entrantes (008): si WA_INBOUND_MEDIA_ENABLED=true el
+  // selftest ejercita la preview de binarios; si no, ejercita el aviso de
+  // "adjuntos no soportados".
+  const MEDIA_ENABLED = process.env.WA_INBOUND_MEDIA_ENABLED === "true";
+
   console.log("== Setup: registro/login + conexión WhatsApp ==");
   const email = "e2e@vocero.test";
   const password = "password-e2e-123";
@@ -492,33 +497,87 @@ async function main() {
   );
 
   console.log("\n== 008: previews de adjuntos entrantes (US3) ==");
-  await api("/api/dev/wa-mock/inbound", {
-    method: "POST",
-    body: JSON.stringify({
-      phoneNumberId: PN,
-      from: LEAD,
-      type: "image",
-      mediaId: "media-e2e-img-1",
-      caption: "foto de mi negocio",
-      waMessageId: "wamid.e2e.008.in.img",
-    }),
-  });
-  await sleep(1600); // ingesta + descarga in-process del binario
-  const msgs6 = (await api(`/api/conversations/${conv008.id}/messages`)).json?.messages ?? [];
-  const inImg = msgs6.find((m) => m.media?.caption === "foto de mi negocio");
-  ok(
-    "imagen entrante queda disponible tras la descarga in-process",
-    inImg?.direction === "in" &&
-      inImg?.media?.kind === "image" &&
-      inImg?.media?.fetchStatus === "available",
-    JSON.stringify(inImg?.media)
-  );
-  const inImgBin = await fetch(`${BASE}/api/media/${inImg?.media?.assetId}`, {
-    headers: { cookie, origin: BASE },
-  });
-  ok("el binario entrante se sirve desde el volumen local", inImgBin.ok);
+  if (MEDIA_ENABLED) {
+    await api("/api/dev/wa-mock/inbound", {
+      method: "POST",
+      body: JSON.stringify({
+        phoneNumberId: PN,
+        from: LEAD,
+        type: "image",
+        mediaId: "media-e2e-img-1",
+        caption: "foto de mi negocio",
+        waMessageId: "wamid.e2e.008.in.img",
+      }),
+    });
+    await sleep(1600); // ingesta + descarga in-process del binario
+    const msgs6 = (await api(`/api/conversations/${conv008.id}/messages`)).json?.messages ?? [];
+    const inImg = msgs6.find((m) => m.media?.caption === "foto de mi negocio");
+    ok(
+      "imagen entrante queda disponible tras la descarga in-process",
+      inImg?.direction === "in" &&
+        inImg?.media?.kind === "image" &&
+        inImg?.media?.fetchStatus === "available",
+      JSON.stringify(inImg?.media)
+    );
+    const inImgBin = await fetch(`${BASE}/api/media/${inImg?.media?.assetId}`, {
+      headers: { cookie, origin: BASE },
+    });
+    ok("el binario entrante se sirve desde el volumen local", inImgBin.ok);
 
-  // Ubicación entrante: payload directo, sin binario (404 en /api/media).
+    // Camino infeliz: media cuya descarga falla (metadata sin url) → failed,
+    // el mensaje se conserva y /api/media responde 410.
+    await api("/api/dev/wa-mock/inbound", {
+      method: "POST",
+      body: JSON.stringify({
+        phoneNumberId: PN,
+        from: LEAD,
+        type: "image",
+        mediaId: "broken-no-url",
+        waMessageId: "wamid.e2e.008.in.broken",
+      }),
+    });
+    await sleep(1600);
+    const msgs8 = (await api(`/api/conversations/${conv008.id}/messages`)).json?.messages ?? [];
+    const broken = msgs8.find((m) => m.id !== inImg?.id && m.media?.fetchStatus === "failed");
+    ok(
+      "descarga fallida degrada a failed sin perder el mensaje",
+      Boolean(broken),
+      JSON.stringify(msgs8.filter((m) => m.media).map((m) => m.media))
+    );
+    if (broken) {
+      const goneRes = await fetch(`${BASE}/api/media/${broken.media.assetId}`, {
+        headers: { cookie, origin: BASE },
+      });
+      ok("asset fallido → 410 gone en /api/media", goneRes.status === 410);
+    }
+
+    // Echo CON adjunto (AC-5 de US1): la foto que el dueño mandó desde el cel.
+    await api("/api/dev/wa-mock/echo", {
+      method: "POST",
+      body: JSON.stringify({
+        phoneNumberId: PN,
+        to: LEAD,
+        type: "image",
+        mediaId: "media-e2e-echo-img",
+        caption: "así quedaría tu logo",
+        waMessageId: "wamid.e2e.008.echo.img",
+      }),
+    });
+    await sleep(1600);
+    const msgs9 = (await api(`/api/conversations/${conv008.id}/messages`)).json?.messages ?? [];
+    const echoImg = msgs9.find((m) => m.media?.caption === "así quedaría tu logo");
+    ok(
+      "echo con imagen: manual + asset descargado y previsualizable",
+      echoImg?.origin === "manual" && echoImg?.media?.fetchStatus === "available",
+      JSON.stringify(echoImg?.media)
+    );
+  } else {
+    console.log(
+      "  (gate de adjuntos activo: se saltea la preview de binarios entrantes)"
+    );
+  }
+
+  // Ubicación entrante: payload estructurado, NO pasa por el gate.
   await api("/api/dev/wa-mock/inbound", {
     method: "POST",
     body: JSON.stringify({
@@ -538,52 +597,103 @@ async function main() {
     JSON.stringify(inLoc?.media)
   );
 
-  // Camino infeliz: media cuya descarga falla (metadata sin url) → failed,
-  // el mensaje se conserva y /api/media responde 410.
-  await api("/api/dev/wa-mock/inbound", {
-    method: "POST",
-    body: JSON.stringify({
-      phoneNumberId: PN,
-      from: LEAD,
-      type: "image",
-      mediaId: "broken-no-url",
-      waMessageId: "wamid.e2e.008.in.broken",
-    }),
-  });
-  await sleep(1600);
-  const msgs8 = (await api(`/api/conversations/${conv008.id}/messages`)).json?.messages ?? [];
-  const broken = msgs8.find((m) => m.id !== inImg?.id && m.media?.fetchStatus === "failed");
-  ok(
-    "descarga fallida degrada a failed sin perder el mensaje",
-    Boolean(broken),
-    JSON.stringify(msgs8.filter((m) => m.media).map((m) => m.media))
-  );
-  if (broken) {
-    const goneRes = await fetch(`${BASE}/api/media/${broken.media.assetId}`, {
-      headers: { cookie, origin: BASE },
+  console.log("\n== 008: gate de adjuntos entrantes (no soportados) ==");
+  if (!MEDIA_ENABLED) {
+    const GATE_LEAD = "5214627008990"; // canónico: 524627008990
+    await api("/api/dev/wa-mock/inbound", {
+      method: "POST",
+      body: JSON.stringify({
+        phoneNumberId: PN,
+        from: GATE_LEAD,
+        name: "Lead adjuntos",
+        type: "image",
+        mediaId: "media-gate-e2e-1",
+        caption: "foto del producto",
+        waMessageId: "wamid.e2e.gate.in.1",
+      }),
     });
-    ok("asset fallido → 410 gone en /api/media", goneRes.status === 410);
+    await sleep(1600); // ingesta + aviso
+    const gateConv = (((await api("/api/conversations")).json?.conversations) ?? []).find(
+      (c) => c.contact.phone === "524627008990"
+    );
+    ok("conversación del lead de adjuntos creada", Boolean(gateConv), "sin conversación");
+    const gateMsgs = gateConv
+      ? (await api(`/api/conversations/${gateConv.id}/messages`)).json?.messages ?? []
+      : [];
+    const gateIn = gateMsgs.find((m) => m.direction === "in" && m.type === "image");
+    ok(
+      "imagen entrante queda en el hilo SIN asset (gate activo)",
+      Boolean(gateIn) && gateIn.media === null,
+      JSON.stringify(gateIn)
+    );
+    const gateOut = gateMsgs.find(
+      (m) => m.direction === "out" && m.type === "text" && m.origin === "operator"
+    );
+    ok(
+      "se respondió el aviso de adjuntos no soportados",
+      Boolean(gateOut) && typeof gateOut.text === "string" && gateOut.text.includes("adjuntos"),
+      JSON.stringify(gateOut)
+    );
+  } else {
+    console.log(
+      "  (procesamiento de adjuntos habilitado: se saltea el aviso de no soportados)"
+    );
   }
 
-  // Echo CON adjunto (AC-5 de US1): la foto que el dueño mandó desde el cel.
-  await api("/api/dev/wa-mock/echo", {
+
+  console.log("\n== 005: asistente comercial con contexto de negocio ==");
+  const CATALOG_LEAD = "5214628006005"; // canónico: 524628006005
+
+  const pubProds = (await api("/api/public/products")).json?.products ?? [];
+  ok(
+    "GET /api/public/products → arreglo de productos activos",
+    Array.isArray(pubProds) && pubProds.length > 0,
+    JSON.stringify(pubProds)
+  );
+  ok(
+    "el catálogo público NUNCA expone costo/margen",
+    pubProds.every((p) => p.costo === undefined && p.margen === undefined),
+    JSON.stringify(pubProds[0])
+  );
+
+  const inbound005 = await api("/api/dev/wa-mock/inbound", {
     method: "POST",
     body: JSON.stringify({
       phoneNumberId: PN,
-      to: LEAD,
-      type: "image",
-      mediaId: "media-e2e-echo-img",
-      caption: "así quedaría tu logo",
-      waMessageId: "wamid.e2e.008.echo.img",
+      from: CATALOG_LEAD,
+      name: "Lead comercial",
+      type: "text",
+      text: "¿Cuánto cuesta el pan de hamburguesa?",
+      waMessageId: "wamid.e2e.005.in.1",
     }),
   });
-  await sleep(1600);
-  const msgs9 = (await api(`/api/conversations/${conv008.id}/messages`)).json?.messages ?? [];
-  const echoImg = msgs9.find((m) => m.media?.caption === "así quedaría tu logo");
   ok(
-    "echo con imagen: manual + asset descargado y previsualizable",
-    echoImg?.origin === "manual" && echoImg?.media?.fetchStatus === "available",
-    JSON.stringify(echoImg?.media)
+    "inbound del lead comercial entregado al webhook",
+    inbound005.res.ok,
+    JSON.stringify(inbound005.json)
+  );
+  await sleep(2500); // espera el turno del agente (ai-mock)
+
+  const conv005 = (((await api("/api/conversations")).json?.conversations) ?? []).find(
+    (c) => c.contact.phone === "524628006005"
+  );
+  ok("la conversación del lead comercial se creó", Boolean(conv005));
+
+  const msgs005 =
+    (await api(`/api/conversations/${conv005?.id}/messages`)).json?.messages ?? [];
+  ok(
+    "el agente respondió al mensaje comercial",
+    msgs005.some((m) => m.direction === "out" && m.origin === "ai"),
+    JSON.stringify(msgs005.at(-1))
+  );
+
+  // El contacto NO debe haber recibido ningún campo de costo en sus datos.
+  const contact005 = (await api(`/api/contacts/${conv005?.contact?.id ?? ""}`)).json?.contact;
+  ok(
+    "el contacto no expone costo/margen",
+    Boolean(contact005) &&
+      contact005.costo === undefined &&
+      contact005.margen === undefined
   );
 
   console.log(`\n===== ${checks - failures}/${checks} checks OK, ${failures} fallos =====`);

@@ -4,7 +4,11 @@
 # ============================================================
 services:
   app:
-    build: .
+    # Imagen construida FUERA del VPS (ver Dockerfile multi-stage): evita el
+    # pico de memoria de `next build` en producción. Cargar con:
+    #   docker save vocero-crm:latest | ssh vocero docker load
+    image: vocero-crm:latest
+    pull_policy: never
     restart: unless-stopped
     environment:
       APP_BASE_URL: ${APP_BASE_URL}
@@ -20,6 +24,11 @@ services:
       OPENROUTER_JUDGE_MODEL: ${OPENROUTER_JUDGE_MODEL:-}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-}
       AGENT_COALESCE_MS: ${AGENT_COALESCE_MS:-6000}
+      # 008: volumen local de adjuntos — el Dockerfile crea /data/media con el
+      # dueño del app, y el volumen nombrado hereda ese dueño al montarse vacío.
+      MEDIA_DIR: /data/media
+    volumes:
+      - vocero_media:/data/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,3 +73,4 @@ volumes:
   vocero_pg:
   vocero_caddy_data:
   vocero_caddy_config:
+  vocero_media:

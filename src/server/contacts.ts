@@ -9,6 +9,19 @@ export function serializeContact(c: typeof schema.contact.$inferSelect) {
     phone: c.phone,
     notes: c.notes,
     archivedAt: c.archivedAt?.toISOString() ?? null,
+    // 005 — datos comerciales del lead (enriquecidos por el agente).
+    empresa: c.empresa ?? null,
+    rubro: c.rubro ?? null,
+    comuna: c.comuna ?? null,
+    rut: c.rut ?? null,
+    razonSocial: c.razonSocial ?? null,
+    giro: c.giro ?? null,
+    direccionFacturacion: c.direccionFacturacion ?? null,
+    email: c.email ?? null,
+    frecuenciaDespacho: c.frecuenciaDespacho ?? null,
+    volumenSemanal: c.volumenSemanal ?? null,
+    productoInteres: c.productoInteres ?? null,
+    formato: c.formato ?? null,
   };
 }
 

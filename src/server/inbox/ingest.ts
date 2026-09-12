@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
+import { isInboundMediaEnabled } from "@/lib/env";
 import { normalizeMx } from "@/lib/meta/client";
 import { publish } from "@/server/events/bus";
 import { getCredentialsByPhoneNumberId } from "@/server/whatsapp/credentials";
@@ -17,6 +18,8 @@ import {
 } from "@/server/inbox/identity";
 import { applyStatusUpdate } from "@/server/inbox/status";
 import { onLeadActivity } from "@/server/inbox/lead-activity";
+import { serializeMessage } from "@/server/inbox/serialize";
+import { sendText } from "@/server/inbox/send";
 import { maybeRunAgentTurn } from "@/server/ai/trigger";
 
 /** Tipos de contenido soportados; el resto se ignora sin error. */
@@ -39,6 +42,23 @@ const BINARY_MEDIA_TYPES = new Set([
   "document",
   "sticker",
 ] as const);
+
+/**
+ * Gate de adjuntos entrantes (008): mientras `WA_INBOUND_MEDIA_ENABLED` no esté
+ * en true, los archivos adjuntos se ignoran — no se descargan ni se almacenan —
+ * y se responde un aviso. Ubicaciones y contactos (payload estructurado, sin
+ * archivo) NO pasan por este gate.
+ */
+export function isInboundMediaBlocked(
+  type: string,
+  mediaEnabled: boolean
+): boolean {
+  return (BINARY_MEDIA_TYPES as Set<string>).has(type) && !mediaEnabled;
+}
+
+/** Aviso que se responde cuando llega un adjunto con el gate activo. */
+const INBOUND_MEDIA_BLOCKED_NOTICE =
+  "Por ahora no puedo recibir archivos adjuntos por WhatsApp. Enviame un mensaje de texto y te ayudo en seguida.";
 
 type MediaInput = {
   kind: (typeof schema.mediaAsset.$inferSelect)["kind"];
@@ -224,6 +244,20 @@ export async function processMessagesValue(value: WebhookValue): Promise<void> {
       );
       continue;
     }
+
+    // Gate de adjuntos entrantes (008): con el gate activo, un adjunto se
+    // registra en el hilo y se responde el aviso; nunca se descarga.
+    if (isInboundMediaBlocked(msg.type, isInboundMediaEnabled())) {
+      await ingestBlockedInboundMedia({
+        organizationId,
+        identity: resolved,
+        waMessageId: msg.id,
+        type: msg.type,
+        timestamp: msg.timestamp,
+      });
+      continue;
+    }
+
     await ingestInboundMessage({
       organizationId,
       identity: resolved,
@@ -428,37 +462,92 @@ export async function ingestInboundMessage(input: {
   await maybeRunAgentTurn(conversation.id);
 }
 
+/**
+ * Ruta del gate de adjuntos entrantes (008): registra el mensaje en el hilo
+ * (tipo conservado, sin asset — la UI muestra "Imagen/Documento…" con clip),
+ * actualiza la conversación y responde el aviso de "no soportados".
+ * Idempotente por wa_message_id: el aviso se envía solo en la primera entrega.
+ * NO dispara al agente: no hay texto que procesar.
+ */
+async function ingestBlockedInboundMedia(input: {
+  organizationId: string;
+  identity: ResolvedIdentity;
+  waMessageId: string;
+  type: string;
+  timestamp: string;
+}): Promise<void> {
+  const db = getDb();
+  const { contact } = await getOrCreateContactByIdentity(
+    input.organizationId,
+    input.identity
+  );
+  const conversation = await getOrCreateConversation(
+    input.organizationId,
+    contact.id
+  );
+
+  const waTimestamp = toDate(input.timestamp);
+
+  const inserted = await db
+    .insert(schema.message)
+    .values({
+      id: newId("message"),
+      organizationId: input.organizationId,
+      conversationId: conversation.id,
+      waMessageId: input.waMessageId,
+      direction: "in",
+      type: input.type,
+      text: null,
+      status: "delivered",
+      waTimestamp,
+    })
+    .onConflictDoNothing({ target: [schema.message.waMessageId] })
+    .returning();
+  const message = inserted[0];
+  if (!message) return; // duplicado: no re-enviar el aviso
+
+  await db
+    .update(schema.conversation)
+    .set({
+      lastInboundAt: waTimestamp,
+      lastMessageAt: waTimestamp,
+      unreadCount: sql`${schema.conversation.unreadCount} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.conversation.id, conversation.id));
+
+  await onLeadActivity(input.organizationId, contact.id, waTimestamp);
+
+  publish(input.organizationId, {
+    type: "message.new",
+    data: {
+      conversationId: conversation.id,
+      message: serializeMessage(message),
+    },
+  });
+  publish(input.organizationId, {
+    type: "conversation.updated",
+    data: { conversation: { id: conversation.id } },
+  });
+
+  // La ventana de 24 h acaba de abrirse con lastInboundAt → el aviso sale sí o
+  // sí. Un fallo de envío jamás tumba el webhook (FR-013): se loguea y sigue.
+  try {
+    await sendText({
+      conversationId: conversation.id,
+      organizationId: input.organizationId,
+      text: INBOUND_MEDIA_BLOCKED_NOTICE,
+    });
+  } catch (err) {
+    console.warn(
+      `[webhook] no se pudo responder el aviso de adjunto a ${conversation.id}:`,
+      err
+    );
+  }
+}
+
 function toDate(timestamp: string): Date {
   const n = Number(timestamp);
   if (Number.isFinite(n) && n > 0) return new Date(n * 1000);
   return new Date();
-}
-
-export function serializeMessage(
-  m: typeof schema.message.$inferSelect,
-  media: typeof schema.mediaAsset.$inferSelect | null = null
-) {
-  return {
-    id: m.id,
-    conversationId: m.conversationId,
-    direction: m.direction,
-    type: m.type,
-    text: m.text,
-    status: m.status,
-    aiGenerated: m.aiGenerated,
-    origin: m.origin,
-    media: media
-      ? {
-          assetId: media.id,
-          kind: media.kind,
-          mimeType: media.mimeType,
-          fileName: media.fileName,
-          fileSize: media.fileSize,
-          caption: media.caption,
-          fetchStatus: media.fetchStatus,
-          payload: media.payload,
-        }
-      : null,
-    createdAt: (m.waTimestamp ?? m.createdAt).toISOString(),
-  };
 }

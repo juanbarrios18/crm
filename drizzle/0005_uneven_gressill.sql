@@ -1,0 +1,1 @@
+ALTER TABLE "agent_test_case" ADD COLUMN "turn_metrics" jsonb;

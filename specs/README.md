@@ -20,3 +20,13 @@ No crees estas carpetas a mano: las generan los comandos de Spec Kit
 `/speckit-git-feature` (o el script `create-new-feature.ps1`).
 
 Ver [../docs/sdd-workflow.md](../docs/sdd-workflow.md).
+
+## Estado de features
+
+| Spec | Feature | Estado |
+|---|---|---|
+| 001 | Núcleo v1 (vocero-core) | Implementada |
+| 002 | Diseño Atlas white-label | Planificada |
+| 003 | Paridad inbox WhatsApp | Implementada |
+| 004 | Integración con n8n como cerebro externo | ⚠️ **DEPRECADA** — n8n queda descartado; Vocero pasa a ser el centro de la conversación (ver 005) |
+| 005 | Asistente comercial con contexto de negocio (catálogo, envíos, leads enriquecidos) | En implementación |

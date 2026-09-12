@@ -9,6 +9,8 @@ sin él, agente/Laboratorio deshabilitados con estado vacío), `OPENROUTER_BASE_
 extracción robusta (bloque ```json, primer `{...}` balanceado), valida con Zod,
 reintenta ante fallo de red/parseo/validación (2 reintentos, backoff corto). Un hipo del
 proveedor NUNCA propaga excepción al turno: agota reintentos → resultado `error` tipado.
+En el resultado `ok` expone además `model` (modelo efectivamente usado) y `latencyMs`
+(ms del intento exitoso) — el Laboratorio los persiste como info del test.
 
 ## Acción del agente (una por turno)
 
@@ -39,7 +41,9 @@ const AgentAction = z.discriminatedUnion('action', [
 
 ## Juez del Laboratorio (una llamada por conversación)
 
-Input: transcript completo + KB + comportamiento. Output (Zod):
+Input: transcript completo + KB + comportamiento + **catálogo público + zonas de envío
+como ground truth** (si el agente cita un precio/comuna que coincide con el catálogo, NO
+es alucinación). Output (Zod):
 
 ```ts
 const Verdict = z.object({

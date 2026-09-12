@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { withAuth } from "@/lib/api";
 import { getDb, schema } from "@/lib/db";
 import { scoped } from "@/lib/db/tenant";
@@ -30,7 +30,14 @@ export const GET = withAuth(async (session) => {
         eq(schema.conversation.isTest, false)
       )
     )
-    .where(scoped(schema.lead.organizationId, session.organizationId))
+    .where(
+      and(
+        scoped(schema.lead.organizationId, session.organizationId),
+        // Los contactos de prueba del Laboratorio están archivados: no deben
+        // aparecer como tarjetas del pipeline real.
+        isNull(schema.contact.archivedAt)
+      )
+    )
     .orderBy(asc(schema.lead.position));
 
   return Response.json({
