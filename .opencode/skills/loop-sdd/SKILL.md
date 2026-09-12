@@ -14,7 +14,7 @@ description: >
 
 El dueño da **objetivos**; tú corres el **loop completo** y vuelves **solo al terminar o al
 bloquearte de verdad**. Es la implementación de `Goal→Work→Check→Repeat` (no `Ask→Answer→Stop`)
-sobre el flujo Spec Kit de este repo. El contrato canónico vive en `CLAUDE.md` → **"Modo
+sobre el flujo Spec Kit de este repo. El contrato canónico vive en `AGENTS.md` → **"Modo
 Objetivo — Loop SDD"** y **"Definición de Hecho REFORZADA"**; este skill es el punto de entrada.
 
 ## Entrada

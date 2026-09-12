@@ -56,4 +56,4 @@ autónoma (skill `loop-sdd`), y vuelve a ti **solo** al verificar en vivo o al b
   dinero) · techo de costo/tiempo.
 
 Ver la *Definición de Hecho REFORZADA* y *Modo Objetivo — Loop SDD* en
-[`CLAUDE.md`](../CLAUDE.md).
+[`AGENTS.md`](../AGENTS.md).

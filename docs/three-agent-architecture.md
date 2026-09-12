@@ -8,7 +8,7 @@ subagentes especializados cuando hace falta.
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  ORQUESTADOR = la sesión principal de Claude Code (tú/Claude) │
-│  Gobernado por: CLAUDE.md  +  skill loop-sdd                  │
+│  Gobernado por: AGENTS.md  +  skill loop-sdd                  │
 │  Rol: corre el loop SDD (Discover→Plan→Execute→Verify→Iterate)│
 │       y DELEGA en los subagentes vía la herramienta Agent.    │
 └───────────────┬──────────────────────────────┬───────────────┘
@@ -30,9 +30,9 @@ subagentes especializados cuando hace falta.
 ## 1. Orquestador (la sesión principal)
 
 No lo creas ni lo configures como subagente. Su "personalidad" y reglas viven en:
-- [`CLAUDE.md`](../CLAUDE.md) — contrato de trabajo: metodología, Definición de Hecho
+- [`AGENTS.md`](../AGENTS.md) — contrato de trabajo: metodología, Definición de Hecho
   REFORZADA, Modo Objetivo / Loop SDD.
-- skill [`loop-sdd`](../.claude/skills/loop-sdd/SKILL.md) — el punto de entrada al loop.
+- skill [`loop-sdd`](../.opencode/skills/loop-sdd/SKILL.md) — el punto de entrada al loop.
 
 Su trabajo: entender el objetivo, correr el flujo SDD, **decidir cuándo delegar** en un
 subagente, y verificar el resultado en vivo antes de declarar "Hecho".

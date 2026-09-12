@@ -29,7 +29,7 @@ Ejecuta `/speckit-constitution` y describe tu producto y tu nicho. Edita
   si tu producto es single-tenant; relaja "Self-Hosted" si aceptas servicios gestionados).
 - Sube la versión y actualiza el Sync Impact Report del encabezado.
 
-## 3. Personaliza `CLAUDE.md`
+## 3. Personaliza `AGENTS.md`
 
 Reemplaza los `[corchetes]`: nombre del proyecto, stack real (framework, BD, auth, deploy),
 y deja vacío el bloque `## Active feature` hasta tu primera feature. **No borres** las
@@ -63,7 +63,7 @@ no puedas verificar tú, márcalo *pendiente de verificación humana*.
 
 ## Checklist de personalización (búsqueda de placeholders)
 
-- [ ] `CLAUDE.md` — `[NOMBRE_DEL_PROYECTO]`, stack, feature activa
+- [ ] `AGENTS.md` — `[NOMBRE_DEL_PROYECTO]`, stack, feature activa
 - [ ] `.specify/memory/constitution.md` — Principio VIII + ajustes I-VII + fechas/versión
 - [ ] `LICENSE` — titular del copyright
 - [ ] `.env.example` / `.env` — `REEMPLAZA_...`

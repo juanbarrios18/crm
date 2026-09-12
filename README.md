@@ -276,7 +276,7 @@ Next.js 15 (App Router) + React 19 · TypeScript estricto · PostgreSQL +
 Drizzle ORM · Better Auth · Tailwind CSS · SSE (sin WebSockets) · Docker
 multi-stage con migraciones al arranque. Diseñado para que una agencia lo
 modifique con un asistente de IA: specs y decisiones de diseño en
-[`specs/`](specs/), guía de modificación en [`CLAUDE.md`](CLAUDE.md).
+[`specs/`](specs/), guía de modificación en [`AGENTS.md`](AGENTS.md).
 
 ## Licencia
 
