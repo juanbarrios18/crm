@@ -41,6 +41,7 @@ Thumbs.db
 .tmp-seed-demo.mjs
 .tmp-seed-products.mjs
 .tmp-seed-zones.mjs
+.tmp-*.mjs
 .dev-media/
 /openspec
 .atl

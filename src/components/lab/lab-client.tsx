@@ -34,7 +34,13 @@ type Run = {
 };
 
 type Hallazgo = {
-  tipo: "alucinacion" | "fuera_de_kb" | "debio_escalar" | "tono";
+  tipo:
+    | "alucinacion"
+    | "fuera_de_kb"
+    | "debio_escalar"
+    | "tono"
+    | "afirmacion_sin_evidencia"
+    | "pipeline";
   evidencia: string;
   sugerencia?: { pregunta: string; respuesta: string };
 };
@@ -51,6 +57,10 @@ type Case = {
   turnCount: number | null;
   judgeLatencyMs: number | null;
   turnMetrics: TurnMetric[];
+  initialStage: string | null;
+  finalStage: string | null;
+  expectAdvance: boolean | null;
+  advanced: boolean | null;
 };
 
 type TurnMetric = {
@@ -73,6 +83,8 @@ const TIPO_LABELS: Record<Hallazgo["tipo"], string> = {
   fuera_de_kb: "Fuera del conocimiento",
   debio_escalar: "Debió escalar",
   tono: "Tono",
+  afirmacion_sin_evidencia: "Afirmación sin evidencia",
+  pipeline: "Pipeline (no avanzó)",
 };
 
 export function LabClient() {
@@ -430,6 +442,16 @@ function CaseCard({ testCase, onApplied }: { testCase: Case; onApplied: () => vo
               Total agente: {formatMs(c.latencyMs)} · {c.turnCount ?? 0} turno(s)
             </span>
             <span>Juez: {formatMs(c.judgeLatencyMs)}</span>
+            {(c.initialStage || c.finalStage) && (
+              <span>
+                Pipeline: {c.initialStage ?? "—"} → {c.finalStage ?? "—"}
+                {c.expectAdvance
+                  ? c.advanced
+                    ? " · avanzó ✓"
+                    : " · NO avanzó ✗"
+                  : ""}
+              </span>
+            )}
           </div>
           {c.turnMetrics.length > 0 && (
             <div className="space-y-1 rounded-md border bg-background/40 p-2 text-[11px] text-muted-foreground">

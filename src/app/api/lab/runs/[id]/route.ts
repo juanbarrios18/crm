@@ -54,6 +54,10 @@ export const GET = withAuth(async (session, _req: Request, ctx: Params) => {
       turnCount: c.turnCount,
       turnMetrics: c.turnMetrics ?? [],
       judgeLatencyMs: c.judgeLatencyMs,
+      initialStage: c.initialStage,
+      finalStage: c.finalStage,
+      expectAdvance: c.expectAdvance,
+      advanced: c.advanced,
     })),
   });
 });

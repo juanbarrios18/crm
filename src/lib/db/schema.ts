@@ -463,6 +463,12 @@ export const agentTestCase = pgTable(
     // Telemetría por turno del agente: [{model, latencyMs, promptTokens,
     // completionTokens, cachedTokens, provider}] del intento exitoso.
     turnMetrics: jsonb("turn_metrics"),
+    // Pipeline (FR-030): etapa del lead al inicio/fin del guion y si se esperaba
+    // avanzar. `advanced` es la verificación determinista del flujo de pipeline.
+    initialStage: text("initial_stage"),
+    finalStage: text("final_stage"),
+    expectAdvance: boolean("expect_advance"),
+    advanced: boolean("advanced"),
     status: text("status", {
       enum: ["pending", "running", "done", "judge_failed"],
     })

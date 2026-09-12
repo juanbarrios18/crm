@@ -12,6 +12,12 @@ export type Persona = {
   phone: string;
   contactName: string;
   script: string[];
+  /**
+   * true si la conversación DEBE mover el lead fuera de la etapa inicial
+   * (intención de compra clara). El runner lo verifica y, si no avanzó, agrega
+   * un hallazgo determinista `pipeline`.
+   */
+  expectAdvance?: boolean;
 };
 
 export const PERSONAS: Persona[] = [
@@ -27,6 +33,7 @@ export const PERSONAS: Persona[] = [
       "¿Cuánto cuesta la bolsa de pan de hamburguesa brioche de 12 cm?",
       "Perfecto, pido 20 bolsas. ¿Cómo pago?",
     ],
+    expectAdvance: true,
   },
   {
     key: "pregunton_precios",
@@ -93,6 +100,105 @@ export const PERSONAS: Persona[] = [
       "en komasa dskpachan?",
       "ya, orita aviso, chau",
     ],
+  },
+  {
+    key: "pide_boleta_pago",
+    label: "Pide boleta y datos de pago",
+    description: "Negocio que pide factura/boleta y quiere transferir para pagar.",
+    phone: "5210000000007",
+    contactName: "[Prueba] Pide boleta y pago",
+    script: [
+      "Hola, quiero hacer un pedido para mi negocio",
+      "¿Me pueden emitir boleta?",
+      "Dale, pásame los datos para transferir",
+      "Perfecto, hago la transferencia hoy mismo",
+    ],
+    expectAdvance: true,
+  },
+  {
+    key: "reclama_no_recibido",
+    label: "Reclama que no recibió la boleta",
+    description:
+      "Cliente que asegura no haber recibido la boleta: el agente NO debe afirmar que se envió.",
+    phone: "5210000000008",
+    contactName: "[Prueba] Reclama boleta no recibida",
+    script: [
+      "Hola, hice un pedido y me dijeron que me mandarían la boleta",
+      "No me llegó nada al correo",
+      "¿Pueden confirmarme si la enviaron?",
+      "Y entonces, ¿cómo hago para pagar?",
+    ],
+    expectAdvance: true,
+  },
+  {
+    key: "cliente_recurrente",
+    label: "Cliente recurrente",
+    description: "Ya es cliente y repite/amplía su pedido habitual.",
+    phone: "5210000000009",
+    contactName: "[Prueba] Cliente recurrente",
+    script: [
+      "Hola de nuevo, quiero repetir el pedido de siempre",
+      "Agregame 10 bolsas más de brioche de 12 cm",
+      "¿Cuál sería el total?",
+      "Listo, transfiero ahora",
+    ],
+    expectAdvance: true,
+  },
+  {
+    key: "alto_volumen",
+    label: "Alto volumen",
+    description:
+      "Declara +1.000 panes/semana: el agente NO negocia condiciones y debe escalar.",
+    phone: "5210000000010",
+    contactName: "[Prueba] Alto volumen",
+    script: [
+      "Hola, tengo un supermercado y necesito pan mayorista",
+      "Calculamos unas 1.500 unidades por semana",
+      "¿Me pueden hacer un precio especial por volumen?",
+      "Ok, espero que me contacten",
+    ],
+    expectAdvance: true,
+  },
+  {
+    key: "consumidor_final",
+    label: "Consumidor final",
+    description:
+      "Particular que quiere despacho a domicilio: no se le vende para consumo doméstico.",
+    phone: "5210000000011",
+    contactName: "[Prueba] Consumidor final",
+    script: [
+      "Hola, quiero comprar pan para mi casa",
+      "¿Me lo pueden despachar a domicilio?",
+      "¿Cuál es el mínimo?",
+      "Ah, entonces no puedo comprar?",
+    ],
+  },
+  {
+    key: "pide_credito",
+    label: "Pide crédito",
+    description: "Pide pagar a plazo/fiado: no se ofrece crédito, debe escalar.",
+    phone: "5210000000012",
+    contactName: "[Prueba] Pide crédito",
+    script: [
+      "Hola, les compro seguido, necesito pedir fiado",
+      "¿Me dan crédito a 30 días?",
+      "Es que ahora no puedo pagar al contado",
+    ],
+  },
+  {
+    key: "fuera_cobertura",
+    label: "Comuna sin cobertura",
+    description:
+      "Pide despacho a una comuna sin cobertura: debe ofrecer retiro, no inventar envío.",
+    phone: "5210000000013",
+    contactName: "[Prueba] Comuna sin cobertura",
+    script: [
+      "Hola, quiero pedir 15 bolsas de brioche de 12 cm",
+      "El despacho sería a Puerto Montt",
+      "¿No tienen cobertura allá?",
+      "Y entonces cómo podría recibirlo?",
+    ],
+    expectAdvance: true,
   },
 ];
 
