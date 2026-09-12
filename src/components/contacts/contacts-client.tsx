@@ -43,9 +43,9 @@ export function ContactsClient() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b px-6 py-4">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 sm:px-6">
         <h2 className="font-semibold">Contactos</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
@@ -55,13 +55,13 @@ export function ContactsClient() {
             />
             Ver archivados
           </label>
-          <div className="relative">
+          <div className="relative w-full sm:w-72">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Buscar por nombre o teléfono…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-72 pl-8"
+              className="w-full pl-8"
             />
           </div>
         </div>

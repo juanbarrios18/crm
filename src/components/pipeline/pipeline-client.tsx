@@ -6,6 +6,7 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  TouchSensor,
   useDraggable,
   useDroppable,
   useSensor,
@@ -37,7 +38,9 @@ export function PipelineClient() {
   const [managing, setManaging] = useState(false);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // 006: arrastre táctil. El delay evita secuestrar el scroll vertical del tablero.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
   );
 
   const refetch = useCallback(async () => {
@@ -87,7 +90,7 @@ export function PipelineClient() {
         </Button>
       </header>
 
-      <div className="flex-1 overflow-x-auto p-4">
+      <div className="flex-1 overflow-x-auto overscroll-x-none p-4">
         <DndContext
           sensors={sensors}
           onDragStart={onDragStart}
@@ -161,7 +164,7 @@ function DraggableLead({ lead }: { lead: BoardLead }) {
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={cn(isDragging && "opacity-40")}
+      className={cn("touch-none", isDragging && "opacity-40")}
     >
       <LeadCard lead={lead} />
     </div>

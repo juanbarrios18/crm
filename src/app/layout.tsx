@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import { accentCssVariables, DEFAULT_BRANDING } from "@/lib/branding";
 import { getBranding } from "@/server/branding";
@@ -13,11 +13,22 @@ const geist = Geist({
 
 export const dynamic = "force-dynamic";
 
+// 006 — PWA: viewport + comportamiento de app instalable (standalone).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#3f5972",
+};
+
 export async function generateMetadata(): Promise<Metadata> {
   const branding = await getBranding().catch(() => DEFAULT_BRANDING);
   return {
     title: `${branding.name} — CRM de WhatsApp`,
     description: "CRM de WhatsApp con agente de IA y Laboratorio de auto-evaluación",
+    icons: {
+      icon: "/icons/icon-192.png",
+      apple: "/icons/apple-touch-icon.png",
+    },
   };
 }
 
@@ -32,6 +43,10 @@ export default async function RootLayout({
         <style
           dangerouslySetInnerHTML={{ __html: accentCssVariables(branding.accent) }}
         />
+        {/* 006 — PWA iOS: lanza en standalone y define el nombre del icono. */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="Vocero" />
       </head>
       <body className="font-sans">{children}</body>
     </html>

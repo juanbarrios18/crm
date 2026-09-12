@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -14,6 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEvents } from "@/components/use-events";
+import { useMediaQuery } from "@/components/hooks/use-media-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,6 +97,9 @@ export function LabClient() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 006: master/detail en móvil (la grilla apila el reporte debajo del historial).
+  const isMobile = useMediaQuery("(max-width: 1023px)");
+  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
 
   const refetchRuns = useCallback(async () => {
     const res = await fetch("/api/lab/runs").catch(() => null);
@@ -149,6 +154,11 @@ export function LabClient() {
     void refetchRuns();
   }
 
+  const selectRun = useCallback((id: string) => {
+    setSelectedRunId(id);
+    setMobileView("detail");
+  }, []);
+
   if (!aiConfigured) {
     return (
       <div className="flex h-full flex-col">
@@ -197,22 +207,48 @@ export function LabClient() {
         </div>
       )}
 
-      <div className="grid gap-6 p-6 lg:grid-cols-[280px_1fr]">
-        <HistoryList
-          runs={runs}
-          selectedRunId={selectedRunId}
-          onSelect={setSelectedRunId}
-        />
-        {detail ? (
-          <Report detail={detail} onApplied={() => void refetchDetail(detail.run.id)} />
-        ) : (
-          <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-            {runs.length === 0
-              ? "Corre tu primera evaluación: 6 clientes simulados conversarán con tu agente y un juez calificará cada conversación."
-              : "Elige una corrida del historial."}
+      {isMobile ? (
+        mobileView === "detail" && detail ? (
+          <div className="space-y-4 p-4">
+            <button
+              onClick={() => setMobileView("list")}
+              className="flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-sm font-medium text-text-2 hover:bg-accent"
+            >
+              <ArrowLeft className="h-4 w-4" strokeWidth={1.7} />
+              Volver al historial
+            </button>
+            <Report
+              detail={detail}
+              onApplied={() => void refetchDetail(detail.run.id)}
+            />
           </div>
-        )}
-      </div>
+        ) : (
+          <div className="p-4">
+            <HistoryList
+              runs={runs}
+              selectedRunId={selectedRunId}
+              onSelect={selectRun}
+            />
+          </div>
+        )
+      ) : (
+        <div className="grid gap-6 p-6 lg:grid-cols-[280px_1fr]">
+          <HistoryList
+            runs={runs}
+            selectedRunId={selectedRunId}
+            onSelect={setSelectedRunId}
+          />
+          {detail ? (
+            <Report detail={detail} onApplied={() => void refetchDetail(detail.run.id)} />
+          ) : (
+            <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
+              {runs.length === 0
+                ? "Corre tu primera evaluación: 6 clientes simulados conversarán con tu agente y un juez calificará cada conversación."
+                : "Elige una corrida del historial."}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -268,7 +304,9 @@ function HistoryList({
           key={run.id}
           onClick={() => onSelect(run.id)}
           className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-accent/50 ${
-            selectedRunId === run.id ? "border-primary/50 bg-accent/60" : "bg-card"
+            selectedRunId === run.id
+              ? "border-brand bg-brand-tint"
+              : "border-border bg-card"
           }`}
         >
           <div className="flex items-center justify-between">

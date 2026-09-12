@@ -21,6 +21,7 @@ const prefixes = {
   product: "prd",
   productCost: "prc",
   deliveryZone: "dz",
+  pushSubscription: "ps",
 } as const;
 
 export type IdKind = keyof typeof prefixes;

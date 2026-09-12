@@ -44,6 +44,12 @@ const envSchema = z.object({
   BOT_API_KEY: z.string().optional(),
   // 008: volumen local de adjuntos (constitución II: sin S3/R2).
   MEDIA_DIR: z.string().default("./.dev-media"),
+  // 006 — Web Push (VAPID, estándar W3C). Sin estas claves el push queda
+  // deshabilitado y la app funciona normal. Genera un par con:
+  //   node scripts/generate-vapid.mjs
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default("mailto:admin@localhost"),
   NODE_ENV: z.string().default("development"),
 });
 
