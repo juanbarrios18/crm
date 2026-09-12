@@ -82,6 +82,19 @@ describe("buildJudgePrompt (ground truth del juez)", () => {
     });
     expect(system).toContain("NO es alucinación");
   });
+
+  it("instruye marcar afirmaciones sin evidencia (acciones no verificables)", () => {
+    const { system } = buildJudgePrompt({
+      persona: "reclama_no_recibido",
+      transcript: [],
+      kbText: "",
+      behaviorText: "",
+      catalogText: "",
+      zonesText: "",
+    });
+    expect(system).toContain("afirmacion_sin_evidencia");
+    expect(system).toContain("NO puede verificar");
+  });
 });
 
 describe("computeScore (FR-033: judge_failed excluido del denominador)", () => {

@@ -7,7 +7,13 @@ export const Verdict = z.object({
   veredicto: z.enum(["verde", "amarillo", "rojo"]),
   hallazgos: z.array(
     z.object({
-      tipo: z.enum(["alucinacion", "fuera_de_kb", "debio_escalar", "tono"]),
+      tipo: z.enum([
+        "alucinacion",
+        "fuera_de_kb",
+        "debio_escalar",
+        "tono",
+        "afirmacion_sin_evidencia",
+      ]),
       evidencia: z.string(),
       sugerencia: z
         .object({ pregunta: z.string(), respuesta: z.string() })

@@ -113,6 +113,13 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain("ZONAS DE ENVÍO");
   });
 
+  it("prohíbe afirmar acciones que el canal no puede realizar", () => {
+    const prompt = build();
+    expect(prompt).toContain("NUNCA afirmes");
+    expect(prompt).toContain("NO envía correos");
+    expect(prompt).toContain("no recibió algo");
+  });
+
   it("instruye a mover de etapa con el campo stage y nombres EXACTOS", () => {
     const prompt = build();
     for (const stage of STAGES) {

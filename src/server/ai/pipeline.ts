@@ -37,6 +37,57 @@ function coalesceMap(): Map<string, CoalesceEntry> {
   return globalForAgent.__agentCoalesce;
 }
 
+/** true si la acción incluye un mensaje visible para el cliente. */
+function actionHasReply(action: AgentActionType): boolean {
+  switch (action.action) {
+    case "reply":
+      return true;
+    case "update_lead":
+    case "move_stage":
+      return Boolean(action.reply);
+    case "handoff":
+      return Boolean(action.farewell);
+    case "none":
+      return false;
+  }
+}
+
+/** Texto de respuesta de una acción, si lo tiene. */
+function replyText(action: AgentActionType): string | undefined {
+  switch (action.action) {
+    case "reply":
+      return action.text;
+    case "update_lead":
+    case "move_stage":
+      return action.reply;
+    case "handoff":
+      return action.farewell;
+    case "none":
+      return undefined;
+  }
+}
+
+/** Adjunta el texto de respuesta a la acción original (preserva su decisión). */
+function attachReply(
+  action: AgentActionType,
+  text: string | undefined
+): AgentActionType {
+  if (!text) return action;
+  switch (action.action) {
+    case "none":
+      return action.stage
+        ? { action: "reply", text, stage: action.stage }
+        : { action: "reply", text };
+    case "reply":
+      return action;
+    case "update_lead":
+    case "move_stage":
+      return { ...action, reply: text };
+    case "handoff":
+      return { ...action, farewell: text };
+  }
+}
+
 /** Punto de entrada con debounce (mensajes entrantes reales). */
 export function scheduleAgentTurn(conversationId: string): void {
   const map = coalesceMap();
@@ -203,6 +254,27 @@ export async function runAgentTurn(
   };
 
   let action: AgentActionType = result.data;
+
+  // El cliente espera respuesta. El modelo chico suele "anotar" con update_lead
+  // (o devolver none) y olvidarse de responder. Si la acción no trae texto,
+  // pedimos UNA corrección para no dejar la conversación colgada.
+  if (!actionHasReply(action)) {
+    const corrective = await chatJson(AgentAction, [
+      ...messages,
+      { role: "assistant", content: result.raw },
+      {
+        role: "system",
+        content:
+          "El cliente espera una respuesta y tu última acción no incluyó texto. " +
+          "Respondé OTRA VEZ el JSON incluyendo SIEMPRE un mensaje para el cliente " +
+          "(campo reply; si es handoff, farewell). No cambies la decisión de fondo.",
+      },
+    ]);
+    if (corrective.ok && actionHasReply(corrective.data)) {
+      // Se conserva la decisión original (nota/etapa) y se le adjunta el texto.
+      action = attachReply(action, replyText(corrective.data));
+    }
+  }
 
   // Etapa objetivo: el modelo la emite como campo independiente en CUALQUIER
   // acción (no compite con la elección de reply/move_stage). Se resuelve contra
