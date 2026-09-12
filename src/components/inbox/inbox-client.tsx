@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { PanelRight } from "lucide-react";
+import { ArrowLeft, PanelRight } from "lucide-react";
 import { cn, formatPhone } from "@/lib/utils";
 import { ContactAvatar } from "@/components/avatar";
 import type { ConversationDto, MessageDto } from "@/lib/types";
 import { useEvents } from "@/components/use-events";
+import { useMediaQuery } from "@/components/hooks/use-media-query";
 import { ConversationList } from "./conversation-list";
 import { MessageThread } from "./message-thread";
 import { Composer } from "./composer";
@@ -22,6 +23,9 @@ export function InboxClient() {
   // Se incrementa con cada evento SSE que puede cambiar la etapa/lead o el
   // estado del agente: el panel de detalles lo observa y refetch en vivo.
   const [detailRev, setDetailRev] = useState(0);
+  // 006: master/detail en móvil. El panel de contacto pasa a overlay.
+  const isMobile = useMediaQuery("(max-width: 767px)");
+  const [mobilePanel, setMobilePanel] = useState(false);
 
   useEffect(() => {
     setPanelOpen(localStorage.getItem("vocero.panelOpen") !== "false");
@@ -77,6 +81,15 @@ export function InboxClient() {
     const match = conversations?.find((c) => c.contact.id === contactParam);
     if (match) select(match.id);
   }, [contactParam, conversations, select]);
+
+  // 006: deep link de la notificación push — /inbox?conversation=<id>
+  const conversationParam = searchParams.get("conversation");
+  useEffect(() => {
+    if (!conversationParam || selectedIdRef.current) return;
+    if (conversations?.some((c) => c.id === conversationParam)) {
+      select(conversationParam);
+    }
+  }, [conversationParam, conversations, select]);
 
   useEvents({
     onMessageNew: ({ conversationId, message }) => {
@@ -158,7 +171,13 @@ export function InboxClient() {
 
   return (
     <div className="flex h-full">
-      <section className="w-[360px] shrink-0 overflow-hidden border-r">
+      {/* Bandeja: en móvil ocupa todo o se oculta al abrir un hilo */}
+      <section
+        className={cn(
+          "shrink-0 overflow-hidden border-r",
+          isMobile ? (selected ? "hidden" : "w-full") : "w-[360px]"
+        )}
+      >
         <ConversationList
           conversations={conversations}
           selectedId={selectedId}
@@ -167,18 +186,33 @@ export function InboxClient() {
         />
       </section>
 
-      <section className="flex min-w-0 flex-1 flex-col">
+      {/* Hilo + compositor */}
+      <section
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          isMobile && !selected && "hidden"
+        )}
+      >
         {selected ? (
           <>
-            <header className="flex items-center justify-between border-b bg-background px-4 py-2.5">
-              <div className="flex items-center gap-3">
+            <header className="flex items-center justify-between border-b bg-background px-3 py-2.5">
+              <div className="flex min-w-0 items-center gap-3">
+                {isMobile && (
+                  <button
+                    onClick={() => setSelectedId(null)}
+                    aria-label="Volver a la bandeja"
+                    className="shrink-0 rounded-sm border p-1.5 text-text-3 hover:bg-accent hover:text-foreground"
+                  >
+                    <ArrowLeft className="h-4 w-4" strokeWidth={1.7} />
+                  </button>
+                )}
                 <ContactAvatar
                   name={selected.contact.name}
                   seed={selected.contact.id}
                   size="md"
                 />
-                <div>
-                  <p className="text-[15px] font-[650] leading-tight">
+                <div className="min-w-0">
+                  <p className="truncate text-[15px] font-[650] leading-tight">
                     {selected.contact.name}
                   </p>
                   <p
@@ -194,14 +228,24 @@ export function InboxClient() {
                   </p>
                 </div>
               </div>
-              {!panelOpen && (
+              {isMobile ? (
                 <button
-                  onClick={() => togglePanel(true)}
-                  aria-label="Mostrar detalles"
-                  className="rounded-sm border p-1.5 text-text-3 hover:bg-accent hover:text-foreground"
+                  onClick={() => setMobilePanel(true)}
+                  aria-label="Ver detalles"
+                  className="shrink-0 rounded-sm border p-1.5 text-text-3 hover:bg-accent hover:text-foreground"
                 >
                   <PanelRight className="h-4 w-4" strokeWidth={1.7} />
                 </button>
+              ) : (
+                !panelOpen && (
+                  <button
+                    onClick={() => togglePanel(true)}
+                    aria-label="Mostrar detalles"
+                    className="rounded-sm border p-1.5 text-text-3 hover:bg-accent hover:text-foreground"
+                  >
+                    <PanelRight className="h-4 w-4" strokeWidth={1.7} />
+                  </button>
+                )
               )}
             </header>
             <MessageThread messages={messages} />
@@ -222,23 +266,43 @@ export function InboxClient() {
         )}
       </section>
 
-      <section
-        className={cn(
-          "shrink-0 overflow-hidden border-l transition-[width] duration-[220ms]",
-          panelOpen && selected ? "w-[320px]" : "w-0 border-l-0"
-        )}
-      >
-        {selected && (
-          <div className="h-full w-[320px]">
-            <ContactPanel
-              conversation={selected}
-              refreshKey={detailRev}
-              onPatchConversation={patchConversation}
-              onClose={() => togglePanel(false)}
+      {/* Panel de contacto: columna en escritorio, sheet en móvil */}
+      {isMobile ? (
+        mobilePanel && selected ? (
+          <>
+            <div
+              className="fixed inset-0 z-30 bg-black/40"
+              onClick={() => setMobilePanel(false)}
             />
-          </div>
-        )}
-      </section>
+            <div className="fixed inset-y-0 right-0 z-40 w-[320px] max-w-[88%] overflow-hidden border-l bg-background shadow-xl">
+              <ContactPanel
+                conversation={selected}
+                refreshKey={detailRev}
+                onPatchConversation={patchConversation}
+                onClose={() => setMobilePanel(false)}
+              />
+            </div>
+          </>
+        ) : null
+      ) : (
+        <section
+          className={cn(
+            "shrink-0 overflow-hidden border-l transition-[width] duration-[220ms]",
+            panelOpen && selected ? "w-[320px]" : "w-0 border-l-0"
+          )}
+        >
+          {selected && (
+            <div className="h-full w-[320px]">
+              <ContactPanel
+                conversation={selected}
+                refreshKey={detailRev}
+                onPatchConversation={patchConversation}
+                onClose={() => togglePanel(false)}
+              />
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

@@ -563,3 +563,32 @@ export const deliveryZone = pgTable(
     index("delivery_zone_org_idx").on(t.organizationId),
   ]
 );
+
+/**
+ * 006 — Suscripción Web Push por usuario y dispositivo.
+ * `endpoint` UNIQUE (idempotencia del subscribe); `auth` y `p256dh` se cifran
+ * en reposo (Principio I) como un único blob JSON en `keys_cipher`/`iv`/`tag`.
+ */
+export const pushSubscription = pgTable(
+  "push_subscription",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    keysCipher: text("keys_cipher").notNull(),
+    keysIv: text("keys_iv").notNull(),
+    keysTag: text("keys_tag").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("push_subscription_endpoint_uq").on(t.endpoint),
+    index("push_subscription_org_idx").on(t.organizationId),
+    index("push_subscription_org_user_idx").on(t.organizationId, t.userId),
+  ]
+);

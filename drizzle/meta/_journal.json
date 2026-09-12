@@ -50,6 +50,13 @@
       "when": 1789165275912,
       "tag": "0006_sharp_odin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789213789858,
+      "tag": "0007_mute_toxin",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import { AgentAction, degradeAction, resolveStage, type AgentActionType } from "
 import { matchesHandoffIntent } from "@/server/ai/handoff";
 import { buildAgentSystemPrompt } from "@/server/ai/prompts";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
+import { notifyHandoff } from "@/server/push/notify";
 
 /**
  * Turno del agente (FR-021..FR-025).
@@ -402,6 +403,12 @@ export async function applyHandoff(
       conversation: { id: conversationId, handoffReason: reason },
     },
   });
+
+  // 006: avisar al responsable por push — jamás en conversaciones de prueba
+  // (guard de sandbox, igual que el envío real de mensajes).
+  if (!updated[0].isTest) {
+    void notifyHandoff(organizationId, conversationId, reason);
+  }
 }
 
 async function moveLeadToStage(

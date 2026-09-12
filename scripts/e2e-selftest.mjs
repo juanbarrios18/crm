@@ -696,6 +696,53 @@ async function main() {
       contact005.margen === undefined
   );
 
+  console.log("\n== 006: push endpoints (config/subscribe/unsubscribe) ==");
+  const pushCfg = await api("/api/push/config");
+  ok(
+    "GET /api/push/config responde con la VAPID pública",
+    pushCfg.res.ok && "publicKey" in (pushCfg.json ?? {}),
+    JSON.stringify(pushCfg.json)
+  );
+
+  const PUSH_ENDPOINT = "https://push.example.test/sub/e2e-1";
+  const sub1 = await api("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify({
+      endpoint: PUSH_ENDPOINT,
+      keys: { auth: "auth-e2e", p256dh: "p256dh-e2e" },
+    }),
+  });
+  ok("POST /api/push/subscribe → ok", sub1.res.ok, JSON.stringify(sub1.json));
+
+  const sub2 = await api("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify({
+      endpoint: PUSH_ENDPOINT,
+      keys: { auth: "auth-e2e", p256dh: "p256dh-e2e" },
+    }),
+  });
+  ok("re-suscribir el mismo endpoint no duplica (upsert)", sub2.res.ok);
+
+  const badSub = await api("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint: "no-es-url", keys: {} }),
+  });
+  ok(
+    "subscribe con body inválido → 422",
+    badSub.res.status === 422,
+    `status=${badSub.res.status}`
+  );
+
+  const unsub = await api("/api/push/unsubscribe", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint: PUSH_ENDPOINT }),
+  });
+  ok(
+    "DELETE /api/push/unsubscribe → ok",
+    unsub.res.ok,
+    JSON.stringify(unsub.json)
+  );
+
   console.log(`\n===== ${checks - failures}/${checks} checks OK, ${failures} fallos =====`);
   process.exit(failures > 0 ? 1 : 0);
 }
