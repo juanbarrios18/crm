@@ -59,7 +59,7 @@ jobs:
 
       - name: Build Docker image
         run: |
-          SHORT_SHA=${{ github.sha[0:7] }}
+          SHORT_SHA="${GITHUB_SHA:0:7}"
           docker build -t vocero-crm:latest -t "vocero-crm:sha-${SHORT_SHA}" .
 
       - name: Set up SSH key
