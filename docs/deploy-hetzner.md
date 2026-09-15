@@ -109,3 +109,9 @@ ssh vocero 'cd /opt/vocero && docker compose up -d'
 - `MEDIA_DIR=/data/media` montado en el volumen nombrado `vocero_media`.
 - Caddy emite/renueva el certificado Let's Encrypt automáticamente vía DuckDNS.
 - `AGENT_COALESCE_MS=2000` en producción (debounce del agente).
+- **Web Push (006)**: las claves VAPID (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT`) van en `/opt/vocero/.env` **y** deben estar expuestas en el
+  servicio `app` de `/opt/vocero/docker-compose.yml`. Sin ellas el push degrada
+  en silencio (el toggle pide permiso pero nunca suscribe). El CI no sincroniza
+  el compose: si cambiás `docker-compose.yml` en el repo, copialo al VPS
+  (`scp docker-compose.yml vocero:/opt/vocero/`) y corré `docker compose up -d`.
