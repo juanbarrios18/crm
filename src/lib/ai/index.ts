@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { getEnv, isAiConfigured } from "@/lib/env";
+import { getEnv, isAiConfigured, isLocalUrl, isMockEnabled } from "@/lib/env";
 
 /**
  * Adaptador LLM OpenRouter-compatible — ÚNICA frontera con el proveedor de IA
@@ -45,6 +45,25 @@ export type ChatTiming = {
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 500;
 
+/**
+ * Guardrail del entorno de pruebas: con los mocks activos el proveedor TIENE que
+ * ser el mock local. Un self-test no puede gastar dinero en una API real, ni por
+ * una variable mal seteada.
+ *
+ * Devuelve el motivo del bloqueo, o `null` si el proveedor está permitido. Es
+ * pura (no toca la red) para poder verificarla sin mocks.
+ */
+export function testProviderGuard(baseUrl: string): string | null {
+  if (!isMockEnabled()) return null;
+  if (isLocalUrl(baseUrl)) return null;
+  return (
+    `Modo pruebas (WA_MOCK_ENABLED=true) con proveedor remoto (${baseUrl}): el ` +
+    "entorno de pruebas no puede apuntar a una API real. Poné " +
+    "OPENROUTER_BASE_URL=http://localhost:3000/api/dev/ai-mock, o apagá " +
+    "WA_MOCK_ENABLED si querés una corrida real deliberada."
+  );
+}
+
 export async function chatJson<T>(
   schema: z.ZodType<T>,
   messages: ChatMessage[],
@@ -58,6 +77,15 @@ export async function chatJson<T>(
     };
   }
   const env = getEnv();
+
+  // Bloqueo ANTES de tocar la red: en modo pruebas el proveedor remoto se
+  // rechaza acá, así el gasto real es imposible aunque la variable esté mal.
+  const blocked = testProviderGuard(env.OPENROUTER_BASE_URL);
+  if (blocked) {
+    console.error(`[ai] ${blocked}`);
+    return { ok: false, error: "provider_error", detail: blocked };
+  }
+
   const model =
     opts?.model ??
     (opts?.judge
