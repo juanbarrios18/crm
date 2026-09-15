@@ -103,6 +103,24 @@ export function isMockEnabled(): boolean {
   );
 }
 
+/**
+ * ¿La URL apunta a este entorno local? El proveedor del entorno de pruebas es
+ * el ai-mock que sirve la propia app, jamás un host de afuera.
+ */
+export function isLocalUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** true si hay proveedor de IA configurado (token presente y no vacío). */
 export function isAiConfigured(): boolean {
   const token = process.env.OPENROUTER_API_TOKEN;

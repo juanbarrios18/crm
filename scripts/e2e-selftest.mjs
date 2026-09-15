@@ -15,6 +15,32 @@
 const BASE = process.env.APP_BASE_URL ?? "http://localhost:3000";
 const BOT_KEY = process.env.BOT_API_KEY;
 
+/**
+ * Guardrail: este self-test corre contra los mocks locales y JAMÁS puede pegarle
+ * a una API real (gasta dinero). Aborta ANTES de cualquier request, y cubre los
+ * DOS canales externos: el proveedor LLM y la Graph API de WhatsApp.
+ */
+const ES_LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/;
+const CANALES = [
+  ["OPENROUTER_BASE_URL", process.env.OPENROUTER_BASE_URL ?? ""],
+  ["META_GRAPH_BASE_URL", process.env.META_GRAPH_BASE_URL ?? ""],
+];
+const REMOTOS = CANALES.filter(([, url]) => !ES_LOCAL.test(url));
+if (REMOTOS.length > 0 || process.env.WA_MOCK_ENABLED !== "true") {
+  const detalle = REMOTOS.length
+    ? REMOTOS.map(([k, v]) => `  ${k}=${v}`).join("\n")
+    : "  WA_MOCK_ENABLED no está en true";
+  console.error(
+    `\n[ABORTADO] El self-test solo corre contra los mocks locales; esto apunta afuera:\n` +
+      `${detalle}\n\n` +
+      "Poné en .env:\n" +
+      "  WA_MOCK_ENABLED=true\n" +
+      "  OPENROUTER_BASE_URL=http://localhost:3000/api/dev/ai-mock\n" +
+      "  META_GRAPH_BASE_URL=http://localhost:3000/api/dev/wa-mock/graph\n"
+  );
+  process.exit(1);
+}
+
 let cookie = "";
 let failures = 0;
 let checks = 0;
