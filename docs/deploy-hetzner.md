@@ -57,6 +57,39 @@ ssh vocero 'cd /opt/vocero && docker compose up -d'
 `docker compose up -d` recrea `app` solo si cambió el id de imagen (compose
 compara el digest). Postgres y Caddy quedan intactos.
 
+## Bootstrap del catálogo comercial (solo en una instancia nueva)
+
+Las migraciones corren solas al arrancar el contenedor, pero **el catálogo
+comercial NO se siembra automáticamente**. El seed es un paso manual y hay que
+correrlo una vez por instancia nueva; sin él la pestaña Productos y
+`/api/public/products` quedan vacías.
+
+El comando se ejecuta **dentro del contenedor** (Postgres no publica puerto, así
+que no se puede correr desde tu máquina apuntando a esa base):
+
+```bash
+# el id de la organización (omitir --org usa la primera de la tabla)
+ssh vocero 'docker exec vocero-postgres-1 psql -U postgres -d vocero -t -c "select id, name from organization;"'
+
+# sembrar productos + zonas de envío
+ssh vocero 'docker exec vocero-app-1 node seed-catalog.mjs --org=<org_id>'
+# → [seed] Catálogo de "<negocio>": N productos nuevos, M actualizados; K zonas de envío.
+```
+
+> **Ojo con re-ejecutarlo.** El upsert es idempotente por clave natural
+> (`organization_id` + `producto` + `masa` + `formato`): no duplica filas, pero
+> **pisa los precios** de las filas que ya existen con los valores del seed. Si
+> el negocio ya editó precios en la UI, volver a correr esto los revierte.
+> Correlo solo para bootstrapar una instancia vacía o cuando el objetivo sea
+> explícitamente re-importar el catálogo.
+
+Verificación:
+
+```bash
+ssh vocero 'docker exec vocero-postgres-1 psql -U postgres -d vocero -t -c "select count(*) from product; select count(*) from delivery_zone;"'
+curl -s https://lamasfood.duckdns.org/api/public/products | head -c 300
+```
+
 ## Verificación post-deploy
 
 ```bash
@@ -109,6 +142,10 @@ ssh vocero 'cd /opt/vocero && docker compose up -d'
 - `MEDIA_DIR=/data/media` montado en el volumen nombrado `vocero_media`.
 - Caddy emite/renueva el certificado Let's Encrypt automáticamente vía DuckDNS.
 - `AGENT_COALESCE_MS=2000` en producción (debounce del agente).
+- **Catálogo comercial**: el seed (`seed-catalog.mjs`) viene empaquetado en la
+  imagen pero **no se ejecuta en el boot** — es un paso manual de instancia
+  nueva (ver *Bootstrap del catálogo comercial*). Empaquetar el bundle no es
+  ejecutarlo.
 - **Web Push (006)**: las claves VAPID (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
   `VAPID_SUBJECT`) van en `/opt/vocero/.env` **y** deben estar expuestas en el
   servicio `app` de `/opt/vocero/docker-compose.yml`. Sin ellas el push degrada
