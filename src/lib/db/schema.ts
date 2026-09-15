@@ -519,12 +519,27 @@ export const product = pgTable(
 );
 
 /**
- * Costo interno del producto (PRIVADO, COGS). 1:1 con product. Ninguna salida
- * pública (agente comercial, endpoint web) consulta esta tabla — separación
- * estructural del dato sensible.
+ * Ledger de costos de producto (PRIVADO, COGS): append-only.
+ *
+ * El costo NO es un estado mutable sino un evento: cambia por compra, lote o
+ * fecha, y una venta vieja debe poder recalcularse con el costo que regía
+ * entonces. Por eso cada fila es un MOVIMIENTO con `vigenteDesde` y solo se
+ * agrega; jamás se hace UPDATE del costo. `margen` NO se guarda: es DERIVADO
+ * de `(precio - costo) / precio` y se pudre apenas cambia el precio o el
+ * costo, así que se calcula on-demand con `computeMargin`
+ * (src/server/catalog/costs.ts).
+ *
+ * A diferencia de la vieja `product_cost` (1:1 con UNIQUE por producto), aquí
+ * NO hay índice único por producto: la historia es una SERIE de movimientos.
+ * La idempotencia se logra por `(organization_id, referencia)` cuando el hecho
+ * trae clave de origen (p.ej. una compra), vía índice parcial; las cargas
+ * manuales sin referencia son un log y sí pueden repetirse.
+ *
+ * Ninguna salida pública (agente comercial, endpoint web) consulta esta tabla
+ * — separación estructural del dato sensible.
  */
-export const productCost = pgTable(
-  "product_cost",
+export const productCostMovement = pgTable(
+  "product_cost_movement",
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id")
@@ -533,14 +548,30 @@ export const productCost = pgTable(
     productId: text("product_id")
       .notNull()
       .references(() => product.id, { onDelete: "cascade" }),
-    costo: numeric("costo", { precision: 12, scale: 4 }),
-    margen: numeric("margen", { precision: 12, scale: 4 }),
+    /** Costo neto por unidad, en la misma unidad que `product.precioUnitarioNeto`. */
+    costoUnitario: numeric("costo_unitario", { precision: 12, scale: 4 }).notNull(),
+    /** Desde cuándo rige. Permite costo histórico: una venta vieja usa el costo de su momento. */
+    vigenteDesde: timestamp("vigente_desde").notNull().defaultNow(),
+    /** De dónde salió el dato. */
+    origen: text("origen", { enum: ["manual", "compra", "importacion"] })
+      .notNull()
+      .default("manual"),
+    /** Clave del origen (p.ej. id de compra): hace idempotente re-importar el mismo hecho. */
+    referencia: text("referencia"),
+    nota: text("nota"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("product_cost_product_uq").on(t.productId),
-    index("product_cost_org_idx").on(t.organizationId),
+    index("product_cost_movement_org_product_vigente_idx").on(
+      t.organizationId,
+      t.productId,
+      t.vigenteDesde
+    ),
+    // Reimportar el mismo origen no duplica. Las cargas manuales (sin
+    // referencia) sí pueden repetirse: son un log.
+    uniqueIndex("product_cost_movement_org_referencia_uq")
+      .on(t.organizationId, t.referencia)
+      .where(sql`${t.referencia} is not null`),
   ]
 );
 

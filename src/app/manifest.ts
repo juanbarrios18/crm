@@ -5,9 +5,9 @@ import type { MetadataRoute } from "next";
 // sigue aplicando dentro de la app (el manifest es estático).
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Vocero CRM",
+    name: "Vocero",
     short_name: "Vocero",
-    description: "CRM de WhatsApp con agente de IA",
+    description: "Sistema de gestión con WhatsApp y agente de IA",
     start_url: "/inbox",
     display: "standalone",
     background_color: "#ffffff",

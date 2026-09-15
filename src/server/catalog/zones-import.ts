@@ -17,6 +17,8 @@ type ZoneRow = {
   activa: boolean;
 };
 
+export type { ZoneRow };
+
 function parseCsvLine(line: string): string[] {
   const fields: string[] = [];
   let current = "";
@@ -66,14 +68,21 @@ export function parseZonesCsv(csvText: string): ZoneRow[] {
   });
 }
 
-/** Upsert idempotente de zonas; devuelve cantidad procesada. */
+/** Upsert idempotente de zonas desde CSV. */
 export async function upsertZonesFromCsv(
   db: ReturnType<typeof getDb>,
   organizationId: string,
   csvText: string
 ): Promise<{ upserted: number }> {
-  const rows = parseZonesCsv(csvText);
-  if (rows.length === 0) return { upserted: 0 };
+  return upsertZoneRows(db, organizationId, parseZonesCsv(csvText));
+}
+
+/** Upsert idempotente de zonas ya normalizadas (usado por los seeds de código). */
+export async function upsertZoneRows(
+  db: ReturnType<typeof getDb>,
+  organizationId: string,
+  rows: ZoneRow[]
+): Promise<{ upserted: number }> {
   for (const row of rows) {
     await upsertZone(db, organizationId, row.comuna, row.costoDespacho, row.activa);
   }

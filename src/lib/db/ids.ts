@@ -19,7 +19,7 @@ const prefixes = {
   testCase: "case",
   mediaAsset: "ma",
   product: "prd",
-  productCost: "prc",
+  productCostMovement: "pcm",
   deliveryZone: "dz",
   pushSubscription: "ps",
 } as const;

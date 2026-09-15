@@ -102,6 +102,10 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain("COGS");
     expect(prompt).not.toContain("margen");
     expect(prompt).not.toContain("product_cost");
+    // El guardrail sobrevive al rename del ledger de costos (008):
+    expect(prompt).not.toContain("product_cost_movement");
+    expect(prompt).not.toContain("costoUnitario");
+    expect(prompt).not.toContain("costo unitario");
     expect(prompt).not.toContain("costo del producto");
     // el catálogo renderizado no expone el campo costo (sin clave "costo": "")
     expect(prompt).not.toMatch(/precio.*costo/i);

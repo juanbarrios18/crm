@@ -14,7 +14,8 @@ import { parseLocalPrice } from "@/lib/catalog";
  * no duplica (Principio IV).
  */
 
-type CsvRow = {
+/** Fila normalizada del catálogo (misma forma para CSV y seeds de código). */
+export type CatalogRow = {
   producto: string;
   masa: string;
   formato: string;
@@ -27,7 +28,7 @@ type CsvRow = {
 };
 
 /** Parser CSV mínimo que respeta comillas (campo con coma). */
-export function parseCatalogCsv(csvText: string): CsvRow[] {
+export function parseCatalogCsv(csvText: string): CatalogRow[] {
   const lines = csvText
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -111,13 +112,24 @@ function parseCsvLine(line: string): string[] {
   return fields;
 }
 
-/** Upsert idempotente del catálogo; devuelve cantidad de filas procesadas. */
+/** Upsert idempotente del catálogo desde CSV. */
 export async function upsertProductsFromCsv(
   db: ReturnType<typeof getDb>,
   organizationId: string,
   csvText: string
 ): Promise<{ inserted: number; updated: number }> {
-  const rows = parseCatalogCsv(csvText);
+  return upsertProductRows(db, organizationId, parseCatalogCsv(csvText));
+}
+
+/**
+ * Upsert idempotente de filas ya normalizadas (misma clave natural que el CSV).
+ * Es la puerta que usan los seeds de código, sin pasar por texto CSV.
+ */
+export async function upsertProductRows(
+  db: ReturnType<typeof getDb>,
+  organizationId: string,
+  rows: CatalogRow[]
+): Promise<{ inserted: number; updated: number }> {
   if (rows.length === 0) return { inserted: 0, updated: 0 };
 
   let inserted = 0;

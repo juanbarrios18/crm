@@ -23,8 +23,8 @@ export const viewport: Viewport = {
 export async function generateMetadata(): Promise<Metadata> {
   const branding = await getBranding().catch(() => DEFAULT_BRANDING);
   return {
-    title: `${branding.name} — CRM de WhatsApp`,
-    description: "CRM de WhatsApp con agente de IA y Laboratorio de auto-evaluación",
+    title: `${branding.name} — Sistema de gestión`,
+    description: "Sistema de gestión con WhatsApp, agente de IA y Laboratorio de auto-evaluación",
     icons: {
       icon: "/icons/icon-192.png",
       apple: "/icons/apple-touch-icon.png",
