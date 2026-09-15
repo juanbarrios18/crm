@@ -8,7 +8,7 @@ import { isWindowOpen } from "@/server/inbox/window";
 import { SendError, sendText } from "@/server/inbox/send";
 import { AgentAction, degradeAction, resolveStage, type AgentActionType } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
-import { buildAgentSystemPrompt } from "@/server/ai/prompts";
+import { buildAgentSystemPrompt, CLOSING_FAREWELL } from "@/server/ai/prompts";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { notifyHandoff } from "@/server/push/notify";
 
@@ -180,8 +180,10 @@ export async function runAgentTurn(
     return null;
   }
 
-  // Patrón de respaldo ANTES del LLM (FR-022).
+  // Patrón de respaldo ANTES del LLM (FR-022). Se despide con el cierre cordial
+  // ANTES de escalar: el agente debe ser siempre el último en escribir.
   if (lastInbound.text && matchesHandoffIntent(lastInbound.text)) {
+    await deliverReply(conversation, CLOSING_FAREWELL);
     await applyHandoff(conversationId, organizationId, "cliente");
     return null;
   }
@@ -267,8 +269,10 @@ export async function runAgentTurn(
         role: "system",
         content:
           "El cliente espera una respuesta y tu última acción no incluyó texto. " +
-          "Respondé OTRA VEZ el JSON incluyendo SIEMPRE un mensaje para el cliente " +
-          "(campo reply; si es handoff, farewell). No cambies la decisión de fondo.",
+          "Respondé OTRA VEZ el JSON incluyendo SIEMPRE un mensaje cordial para el cliente " +
+          "(campo reply; si es handoff, farewell). Si el cliente se está despidiendo, " +
+          "agradeciendo o cerrando el tema, cerrá con un mensaje que diga que quedamos " +
+          "a la orden para cualquier otra duda. No cambies la decisión de fondo.",
       },
     ]);
     if (corrective.ok && actionHasReply(corrective.data)) {
@@ -325,9 +329,9 @@ export async function runAgentTurn(
       return timing;
     }
     case "handoff": {
-      if (action.farewell) {
-        await deliverReply(conversation, action.farewell);
-      }
+      // El agente SIEMPRE cierra cordialmente: si el modelo no trajo farewell,
+      // se usa el cierre determinista antes de pasar a atención humana.
+      await deliverReply(conversation, action.farewell ?? CLOSING_FAREWELL);
       await applyHandoff(conversationId, organizationId, "modelo");
       return timing;
     }
