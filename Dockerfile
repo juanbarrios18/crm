@@ -23,6 +23,12 @@ RUN pnpm exec esbuild scripts/migrate.mjs --bundle --platform=node \
 RUN pnpm exec esbuild scripts/seed/demo.ts --bundle --platform=node \
     --format=esm --outfile=seed-demo.bundle.mjs --alias:@=./src \
     --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
+# seed del catálogo comercial: bootstrapea productos y zonas en un deploy nuevo.
+# Sin esto el comando `node seed-catalog.mjs` que documenta scripts/seed/catalog.ts
+# no existe dentro de la imagen.
+RUN pnpm exec esbuild scripts/seed/catalog.ts --bundle --platform=node \
+    --format=esm --outfile=seed-catalog.bundle.mjs --alias:@=./src \
+    --banner:js="import { createRequire } from 'module'; const require = createRequire(import.meta.url);"
 
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -39,6 +45,7 @@ COPY --from=builder --chown=vocero:vocero /app/.next/static ./.next/static
 COPY --from=builder --chown=vocero:vocero /app/public ./public
 COPY --from=builder --chown=vocero:vocero /app/migrate.bundle.mjs ./migrate.mjs
 COPY --from=builder --chown=vocero:vocero /app/seed-demo.bundle.mjs ./seed-demo.mjs
+COPY --from=builder --chown=vocero:vocero /app/seed-catalog.bundle.mjs ./seed-catalog.mjs
 COPY --from=builder --chown=vocero:vocero /app/drizzle ./drizzle
 
 USER vocero
