@@ -62,9 +62,9 @@ export function BrandingClient() {
     <div className="max-w-2xl space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Marca del CRM</CardTitle>
+          <CardTitle>Marca del sistema</CardTitle>
           <CardDescription>
-            Este CRM es tuyo: ponle el nombre de tu negocio y tu color. Se
+            Este sistema es tuyo: ponle el nombre de tu negocio y tu color. Se
             reflejan en toda la interfaz y en la pantalla de inicio de sesión.
           </CardDescription>
         </CardHeader>
@@ -138,7 +138,7 @@ export function BrandingClient() {
                 <span className="block text-[15px] font-[650] leading-tight">
                   {name.trim() || "Vocero"}
                 </span>
-                <span className="block text-[11px] text-text-3">CRM · WhatsApp</span>
+                <span className="block text-[11px] text-text-3">Sistema de gestión</span>
               </span>
               <span className="flex-1" />
               <span

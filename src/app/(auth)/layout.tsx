@@ -14,7 +14,7 @@ export default async function AuthLayout({
           </span>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{branding.name}</h1>
-            <p className="text-sm text-text-3">CRM de WhatsApp con agente de IA</p>
+            <p className="text-sm text-text-3">Sistema de gestión con WhatsApp y agente de IA</p>
           </div>
         </div>
         {children}

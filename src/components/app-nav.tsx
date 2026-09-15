@@ -4,15 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Calculator,
+  Factory,
   FlaskConical,
   Inbox,
   Kanban,
   LogOut,
   Menu,
+  Package,
   Settings,
+  ShoppingCart,
   Sparkles,
+  Truck,
   Users,
+  Wallet,
+  Warehouse,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import type { Branding } from "@/lib/branding";
 import { cn, initials } from "@/lib/utils";
@@ -20,13 +28,57 @@ import { signOut } from "@/lib/auth/client";
 import { useEvents } from "@/components/use-events";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 
-const NAV = [
-  { href: "/inbox", label: "Bandeja", icon: Inbox, badge: true },
-  { href: "/pipeline", label: "Pipeline", icon: Kanban },
-  { href: "/contacts", label: "Contactos", icon: Users },
-  { href: "/agent", label: "Agente", icon: Sparkles },
-  { href: "/lab", label: "Laboratorio", icon: FlaskConical },
-] as const;
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  badge?: boolean;
+};
+
+/**
+ * El sidebar refleja el DOMINIO, no las tablas: relación (entidades vivas que
+ * conversan y avanzan) · operación (cosas que se producen, se mueven y cuestan)
+ * · sistema (cómo se comporta la máquina).
+ *
+ * Se agrupa por ANCHURA, no por profundidad: son áreas entre las que el dueño
+ * salta todo el día, así que van visibles en vez de detrás de un sub-nav. El
+ * sub-nav está reservado para profundidad (configuración de vez en cuando),
+ * que es exactamente lo que hace Ajustes.
+ */
+const NAV_GROUPS: readonly { label: string; items: readonly NavItem[] }[] = [
+  {
+    label: "Relación",
+    items: [
+      { href: "/inbox", label: "Bandeja", icon: Inbox, badge: true },
+      { href: "/pipeline", label: "Pipeline", icon: Kanban },
+      { href: "/contacts", label: "Contactos", icon: Users },
+    ],
+  },
+  {
+    label: "Operaciones",
+    items: [
+      { href: "/products", label: "Productos", icon: Package },
+      { href: "/shipping", label: "Envíos", icon: Truck },
+      { href: "/inventory", label: "Inventario", icon: Warehouse },
+      { href: "/production", label: "Producción", icon: Factory },
+      { href: "/costs", label: "Costos", icon: Calculator },
+    ],
+  },
+  {
+    label: "Finanzas",
+    items: [
+      { href: "/sales", label: "Ventas", icon: ShoppingCart },
+      { href: "/expenses", label: "Gastos", icon: Wallet },
+    ],
+  },
+  {
+    label: "Sistema",
+    items: [
+      { href: "/agent", label: "Agente", icon: Sparkles },
+      { href: "/lab", label: "Laboratorio", icon: FlaskConical },
+    ],
+  },
+];
 
 export function AppNav({
   branding,
@@ -80,46 +132,53 @@ export function AppNav({
         <span className="block truncate text-[16px] font-[650] leading-tight tracking-tight">
           {branding.name}
         </span>
-        <span className="block text-[11px] text-text-3">CRM · WhatsApp</span>
+        <span className="block text-[11px] text-text-3">Sistema de gestión</span>
       </span>
     </div>
   );
 
   const links = (
-    <nav className="flex flex-col gap-0.5">
-      {NAV.map((item) => {
-        const active =
-          pathname === item.href || pathname.startsWith(`${item.href}/`);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={close}
-            className={cn(
-              "flex items-center gap-[11px] rounded-sm px-2.5 py-2 text-sm font-medium transition-colors",
-              active
-                ? "bg-brand-tint font-semibold text-brand-text"
-                : "text-text-2 hover:bg-accent"
-            )}
-          >
-            <item.icon
-              className={cn("h-[18px] w-[18px]", active ? "text-brand" : "text-text-3")}
-              strokeWidth={1.7}
-            />
-            <span className="flex-1">{item.label}</span>
-            {"badge" in item && item.badge && unread > 0 && (
-              <span
+    <nav className="flex flex-col gap-3.5">
+      {NAV_GROUPS.map((group) => (
+        <div key={group.label} className="flex flex-col gap-0.5">
+          <p className="px-2.5 pb-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-text-3">
+            {group.label}
+          </p>
+          {group.items.map((item) => {
+            const active =
+              pathname === item.href || pathname.startsWith(`${item.href}/`);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={close}
                 className={cn(
-                  "flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[10.5px] font-semibold",
-                  active ? "bg-brand text-white" : "bg-border-strong text-text-2"
+                  "flex items-center gap-[11px] rounded-sm px-2.5 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-brand-tint font-semibold text-brand-text"
+                    : "text-text-2 hover:bg-accent"
                 )}
               >
-                {unread}
-              </span>
-            )}
-          </Link>
-        );
-      })}
+                <item.icon
+                  className={cn("h-[18px] w-[18px]", active ? "text-brand" : "text-text-3")}
+                  strokeWidth={1.7}
+                />
+                <span className="flex-1">{item.label}</span>
+                {item.badge && unread > 0 && (
+                  <span
+                    className={cn(
+                      "flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[10.5px] font-semibold",
+                      active ? "bg-brand text-white" : "bg-border-strong text-text-2"
+                    )}
+                  >
+                    {unread}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 
