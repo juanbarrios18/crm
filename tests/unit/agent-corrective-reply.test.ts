@@ -155,4 +155,55 @@ describe("pipeline: corrección cuando la acción no trae respuesta", () => {
     );
     expect(graphRequest).not.toHaveBeenCalled();
   });
+
+  it("intención de humano → se despide cordialmente y recién escala", async () => {
+    selectQueue.push(
+      [
+        {
+          id: "cv_2",
+          organizationId: "org_1",
+          contactId: "ct_1",
+          isTest: true,
+          aiEnabled: true,
+          handoffAt: null,
+          handoffReason: null,
+          lastInboundAt: new Date(),
+        },
+      ],
+      [
+        {
+          id: "agp_1",
+          organizationId: "org_1",
+          enabled: true,
+          name: "A",
+          tone: null,
+          instructions: null,
+          escalationRules: null,
+          greeting: null,
+        },
+      ],
+      [
+        {
+          id: "m1",
+          direction: "in",
+          text: "quiero hablar con un humano",
+          createdAt: new Date(),
+        },
+      ]
+    );
+
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    const { CLOSING_FAREWELL } = await import("@/server/ai/prompts");
+    await runAgentTurn("cv_2");
+
+    const reply = inserts.find(
+      (i) =>
+        typeof i.values === "object" &&
+        i.values !== null &&
+        (i.values as { direction?: string }).direction === "out"
+    );
+    expect(reply).toBeDefined();
+    expect((reply!.values as { text: string }).text).toBe(CLOSING_FAREWELL);
+    expect(graphRequest).not.toHaveBeenCalled();
+  });
 });

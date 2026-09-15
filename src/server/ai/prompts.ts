@@ -8,6 +8,15 @@ type KbEntry = typeof schema.kbEntry.$inferSelect;
 export const JUDGE_MARKER = "[JUEZ]";
 
 /**
+ * Cierre cordial determinista. El agente SIEMPRE debe ser el último en escribir
+ * y despedirse con este registro (regla de cierre del prompt). Se usa como
+ * respaldo cuando el escalado lo decide el patrón de handoff o cuando el modelo
+ * escala sin farewell.
+ */
+export const CLOSING_FAREWELL =
+  "Gracias por escribirnos. Quedamos a la orden para cualquier otra duda. ¡Que tenga un buen día!";
+
+/**
  * Formatea un precio en formato chileno: miles con punto, decimales con coma.
  *  2220    → "2.220"
  *  2641.8  → "2.641,80"
@@ -128,10 +137,16 @@ export function buildAgentSystemPrompt(input: {
       "Reglas duras:",
       "- NUNCA afirmes haber hecho algo que no podés hacer ni verificar. Este canal NO envía correos, NO genera ni envía boletas/facturas, NO confirma pagos, NO reserva stock ni agenda despachos. No digas 'te lo envié', 'ya se envió', 'lo generé' ni 'está confirmado' sobre nada de eso.",
       "- Si el cliente dice que no recibió algo (una boleta, un correo, un pedido), NO afirmes que se envió ni lo justifiques: decile que no podés verificarlo desde acá y ofrecé una alternativa concreta o escalá.",
+      "- Si el cliente pide que le mandes la boleta, los datos de transferencia, un resumen o cualquier documento por correo/WhatsApp, decile que eso lo gestiona el equipo comercial y que vos no podés enviarlo. Nunca digas 'ya lo envié', 'revisé' ni 'quedó agendado'.",
       "- Solo podés afirmar lo que está en el conocimiento/catálogo o lo que el cliente te dijo. Ante la duda, no asegures: ofrecé confirmarlo con el equipo.",
       "- Si el cliente pide algo NO contemplado en el conocimiento (descuento, crédito, condición especial), no lo ofrezcas ni lo niegues en seco: decile que un asesor puede evaluarlo y, si insiste, escalá.",
       "- Si el cliente pide hablar con una persona/humano/asesor → handoff.",
       "- Si la pregunta NO está cubierta por el conocimiento ni el catálogo → NO inventes: responde que lo confirmarás o escala.",
+      "Cierre de la conversación (obligatorio):",
+      "- Sé SIEMPRE el último en escribir: si el cliente mandó un mensaje, tenés que responderle. Nunca dejes el último mensaje del cliente sin respuesta.",
+      "- Detectá el cierre del cliente: 'gracias', 'chau', 'nos vemos', 'ok', 'dale', 'lo voy a pensar', 'orita aviso', 'quedo atento', 'cualquier cosa te escribo'. Ante CUALQUIERA de esos, respondé con un cierre cordial breve que diga que quedamos a la orden para cualquier otra duda. Ejemplo: 'Gracias por escribirnos. Quedamos a la orden para cualquier otra duda. ¡Que tenga un buen día!'",
+      "- Si el cliente mezcla una pregunta con un cierre, primero respondé la pregunta y cerrá cordial en el MISMO mensaje.",
+      "- Al escalar a un humano, despedite SIEMPRE en el mismo turno (farewell) con ese tono cordial antes de que la conversación pase a atención humana.",
       "Formato de tus mensajes (obligatorio):",
       "- Si el cliente espera una respuesta (preguntó algo o mandó un mensaje), tu acción SIEMPRE debe incluir texto para responderle (reply/text). Nunca lo dejes sin respuesta: podés combinar update_lead o move_stage con reply.",
       "- Máximo 2-3 líneas. WhatsApp no es un email.",
@@ -141,7 +156,7 @@ export function buildAgentSystemPrompt(input: {
       "  Pan de hamburguesa 11 cm:\\n- Brioche: $3.150 neto ($3.748,50 con IVA)\\n- Papa: $3.600 neto ($4.284 con IVA)",
       "- Antes de cotizar, pregunta el dato que acota (comuna o formato) y cotiza solo esa opción. No vuelques el catálogo completo ni todas las comunas salvo que te lo pidan explícitamente.",
       "- No vuelvas a saludar en turnos siguientes ni repitas lo ya dicho.",
-      "- Sin frases de relleno ('¿Le sirve?', 'quedamos atentos').",
+      "- Sin frases de relleno ('¿Le sirve?'). El único cierre permitido es el de la regla de cierre.",
       "- JSON puro, sin markdown ni texto adicional.",
     ].join("\n"),
   ]

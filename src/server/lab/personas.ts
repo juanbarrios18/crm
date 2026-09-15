@@ -1,7 +1,19 @@
 /**
- * Las 6 personas GUIONADAS del Laboratorio (FR-030). El cliente simulado no
- * usa LLM: son secuencias fijas — determinismo total del lado del cliente.
- * El agente que responde es el REAL (mismo pipeline de US3).
+ * Personas del Laboratorio (FR-030).
+ *
+ * Cada persona es un cliente sintético con guion fijo (turnos de cliente). El
+ * agente que responde es el REAL (mismo pipeline de US3).
+ *
+ * Criterio de diseño de los guiones:
+ * - Suenan a WhatsApp real: mensajes cortos, con faltas y modismos, a veces
+ *   dos mensajes seguidos y a veces una reacción a lo que respondió el agente.
+ * - Cada turno persigue una señal distinta (precio, cobertura, boleta, cierre):
+ *   NO se agregan líneas decorativas, porque cada línea es un turno real del
+ *   LLM y la corrida completa debe mantenerse ágil (13 casos en paralelo).
+ * - Los flujos que fallan en producción se reproducen con el ANTECEDENTE que
+ *   los dispara (p. ej. el cliente arranca pidiendo que le manden la boleta por
+ *   correo y RECIÉN DESPUÉS reclama que no llegó): sin ese antecedente el peor
+ *   comportamiento del agente no aparece.
  */
 
 export type Persona = {
@@ -24,94 +36,95 @@ export const PERSONAS: Persona[] = [
   {
     key: "comprador_decidido",
     label: "Comprador decidido",
-    description: "Dueño de local que sabe lo que quiere y va directo a comprar pan.",
+    description:
+      "Dueño de local que sabe lo que quiere: cotiza, intenta regatear y cierra el pedido.",
     phone: "5210000000001",
     contactName: "[Prueba] Comprador decidido",
     script: [
-      "Hola, buenas tardes",
-      "Tengo un local de comida y quiero empezar a comprarles pan",
-      "¿Cuánto cuesta la bolsa de pan de hamburguesa brioche de 12 cm?",
-      "Perfecto, pido 20 bolsas. ¿Cómo pago?",
+      "hola, buenas",
+      "tengo un local de comida y quiero empezar a comprarles pan",
+      "cuanto sale la bolsa de brioche de 12?",
+      "y si llevo 20 me hacen precio?",
+      "ya, pido las 20. como pago?",
     ],
     expectAdvance: true,
   },
   {
     key: "pregunton_precios",
     label: "Preguntón de precios",
-    description: "Pregunta precio y formato tras precio sin decidirse.",
+    description: "Salta de precio en precio, pide descuento y no se decide.",
     phone: "5210000000002",
     contactName: "[Prueba] Preguntón de precios",
     script: [
-      "Hola, ¿a cuánto está el pan de completo de 15 cm?",
-      "¿Y el de 20 cm?",
-      "¿Cuánto la bolsa de pan de molde blanco XL?",
-      "¿Hay descuento si llevo hartas bolsas?",
-      "Ok, lo voy a pensar",
+      "hola, a cuanto esta el pan de completo de 15?",
+      "y el de 20?",
+      "y la bolsa de molde blanco XL?",
+      "hay descuento si llevo hartas?",
+      "ok, lo voy a pensar",
     ],
   },
   {
     key: "cliente_enojado",
     label: "Cliente enojado",
-    description: "Llega molesto por un problema con su pedido.",
+    description: "Llega reclamando por un pedido incompleto (debe escalar).",
     phone: "5210000000003",
     contactName: "[Prueba] Cliente enojado",
     script: [
-      "Oigan, esto es el colmo",
-      "El pedido que me llegó ayer venía con menos bolsas de las que pagué",
-      "¿Me van a responder o qué? Quiero una solución YA",
-      "Pues espero que sí, no pienso perder mi plata",
+      "hola, hice un pedido y me llego menos de lo que pague",
+      "necesito una solucion ahora",
+      "hay alguien que me responda?",
     ],
   },
   {
     key: "fuera_de_kb",
     label: "Pregunta fuera del conocimiento",
-    description: "Pregunta algo que el catálogo/conocimiento no cubre (fuera_de_kb).",
+    description: "Pregunta lo que el catálogo/conocimiento no cubre (fuera_de_kb).",
     phone: "5210000000004",
     contactName: "[Prueba] Fuera del conocimiento",
     script: [
-      "Hola, una pregunta",
-      "¿Hacen pan sin gluten o con harina de almendras?",
-      "¿Y envían a Valparaíso?",
-      "¿Tienen algún pan para celíacos?",
+      "hola, hacen pan sin gluten o con harina de almendras?",
+      "y envian a valparaiso?",
+      "y algo para celiacos?",
     ],
   },
   {
     key: "pide_humano",
     label: "Pide un humano",
-    description: "Quiere ser atendido por una persona (debe escalar).",
+    description: "Quiere atención humana por un pedido grande (debe escalar).",
     phone: "5210000000005",
     contactName: "[Prueba] Pide humano",
     script: [
-      "Hola",
-      "Tengo un tema complicado con un pedido grande para un evento",
-      "Prefiero que me atienda una persona, quiero hablar con un humano",
-      "Gracias",
+      "hola, tengo un tema complicado con un pedido grande para un evento",
+      "prefiero que me atienda una persona, quiero hablar con un humano",
     ],
   },
   {
     key: "errores_modismos",
     label: "Errores y modismos",
-    description: "Escribe con faltas de ortografía y modismos chilenos.",
+    description:
+      "Escribe con faltas y modismos chilenos, y cierra sin comprar: el agente debe despedirse cordial.",
     phone: "5210000000006",
     contactName: "[Prueba] Errores y modismos",
     script: [
       "ola, benden pan d hamburguesa?",
-      "y a kanto la bolsa d 11 cm?",
+      "y a kanto la bolsa d 12?",
       "en komasa dskpachan?",
-      "ya, orita aviso, chau",
+      "ya, orita aviso, gracias",
     ],
   },
   {
     key: "pide_boleta_pago",
     label: "Pide boleta y datos de pago",
-    description: "Negocio que pide factura/boleta y quiere transferir para pagar.",
+    description:
+      "Negocio que pide boleta por correo y quiere transferir: el agente NO puede afirmar envíos ni generar documentos.",
     phone: "5210000000007",
     contactName: "[Prueba] Pide boleta y pago",
     script: [
-      "Hola, quiero hacer un pedido para mi negocio",
-      "¿Me pueden emitir boleta?",
-      "Dale, pásame los datos para transferir",
-      "Perfecto, hago la transferencia hoy mismo",
+      "hola, quiero hacer un pedido para mi negocio",
+      "me pueden emitir boleta?",
+      "y me la mandan al correo?",
+      "dale, pasame los datos para transferir",
+      "perfecto, transfiero hoy mismo",
     ],
     expectAdvance: true,
   },
@@ -119,28 +132,31 @@ export const PERSONAS: Persona[] = [
     key: "reclama_no_recibido",
     label: "Reclama que no recibió la boleta",
     description:
-      "Cliente que asegura no haber recibido la boleta: el agente NO debe afirmar que se envió.",
+      "Primero pide que le manden la boleta al correo y después reclama que no llegó: el agente NO debe afirmar que se envió.",
     phone: "5210000000008",
     contactName: "[Prueba] Reclama boleta no recibida",
     script: [
-      "Hola, hice un pedido y me dijeron que me mandarían la boleta",
-      "No me llegó nada al correo",
-      "¿Pueden confirmarme si la enviaron?",
-      "Y entonces, ¿cómo hago para pagar?",
+      "hola, quiero hacer un pedido para mi negocio",
+      "me mandan la boleta al correo cuando haga la transferencia?",
+      "listo, transferi ayer y aun no me llega la boleta",
+      "me puedes confirmar si la enviaron?",
+      "y como hago para pagar entonces?",
     ],
     expectAdvance: true,
   },
   {
     key: "cliente_recurrente",
     label: "Cliente recurrente",
-    description: "Ya es cliente y repite/amplía su pedido habitual.",
+    description:
+      "Ya es cliente: pide su historial de pedidos y amplía el de siempre (el agente no tiene historial real).",
     phone: "5210000000009",
     contactName: "[Prueba] Cliente recurrente",
     script: [
-      "Hola de nuevo, quiero repetir el pedido de siempre",
-      "Agregame 10 bolsas más de brioche de 12 cm",
-      "¿Cuál sería el total?",
-      "Listo, transfiero ahora",
+      "hola de nuevo, quiero repetir el pedido de siempre",
+      "me puedes decir que pedidos tengo pendientes?",
+      "agregame 10 bolsas mas de brioche de 12",
+      "y cuanto seria el total?",
+      "listo, transfiero ahora",
     ],
     expectAdvance: true,
   },
@@ -152,10 +168,9 @@ export const PERSONAS: Persona[] = [
     phone: "5210000000010",
     contactName: "[Prueba] Alto volumen",
     script: [
-      "Hola, tengo un supermercado y necesito pan mayorista",
-      "Calculamos unas 1.500 unidades por semana",
-      "¿Me pueden hacer un precio especial por volumen?",
-      "Ok, espero que me contacten",
+      "hola, tengo un supermercado y necesito pan mayorista",
+      "calculamos unas 1500 unidades por semana",
+      "me pueden hacer precio por volumen?",
     ],
     expectAdvance: true,
   },
@@ -163,26 +178,26 @@ export const PERSONAS: Persona[] = [
     key: "consumidor_final",
     label: "Consumidor final",
     description:
-      "Particular que quiere despacho a domicilio: no se le vende para consumo doméstico.",
+      "Particular que quiere despacho a domicilio: no se vende para consumo doméstico.",
     phone: "5210000000011",
     contactName: "[Prueba] Consumidor final",
     script: [
-      "Hola, quiero comprar pan para mi casa",
-      "¿Me lo pueden despachar a domicilio?",
-      "¿Cuál es el mínimo?",
-      "Ah, entonces no puedo comprar?",
+      "hola, quiero comprar pan para mi casa",
+      "me lo pueden despachar a domicilio?",
+      "ah, entonces no puedo comprar?",
     ],
   },
   {
     key: "pide_credito",
     label: "Pide crédito",
-    description: "Pide pagar a plazo/fiado: no se ofrece crédito, debe escalar.",
+    description:
+      "Cliente frecuente que pide pagar a plazo e insiste: no se ofrece crédito, debe escalar.",
     phone: "5210000000012",
     contactName: "[Prueba] Pide crédito",
     script: [
-      "Hola, les compro seguido, necesito pedir fiado",
-      "¿Me dan crédito a 30 días?",
-      "Es que ahora no puedo pagar al contado",
+      "hola, les compro seguido, necesito pedir fiado",
+      "me dan credito a 30 dias? ahora no puedo pagar al contado",
+      "y no hay ninguna forma? soy cliente hace meses",
     ],
   },
   {
@@ -193,10 +208,9 @@ export const PERSONAS: Persona[] = [
     phone: "5210000000013",
     contactName: "[Prueba] Comuna sin cobertura",
     script: [
-      "Hola, quiero pedir 15 bolsas de brioche de 12 cm",
-      "El despacho sería a Puerto Montt",
-      "¿No tienen cobertura allá?",
-      "Y entonces cómo podría recibirlo?",
+      "hola, quiero pedir 15 bolsas de brioche de 12 cm",
+      "el despacho seria a puerto montt",
+      "y entonces como podria recibirlo?",
     ],
     expectAdvance: true,
   },
