@@ -29,8 +29,8 @@ import { applyDialectCheck } from "@/server/lab/dialect-check";
  * DECISIÓN VIGENTE: se mantiene en 3 mientras el agente está en fase de
  * optimización, donde hace falta saber si un cambio movió la aguja o fue
  * varianza. Al entrar en mantenimiento corresponde bajarlo: ahí ya no se busca
- * atribuir mejoras y el costo por corrida deja de justificarse. Si vas a
- * reducirlo, revisá que el reporte de dispersión siga teniendo sentido (con 2
+ * atribuir mejoras y el costo por corrida deja de justificarse. Si se reduce,
+ * revisar que el reporte de dispersión siga teniendo sentido: con 2
  * repeticiones la mediana ya no es estable, y con 1 el instrumento vuelve a ser
  * un score único).
  */
