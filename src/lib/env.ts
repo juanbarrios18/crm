@@ -10,6 +10,13 @@ import { z } from "zod";
 
 const envSchema = z.object({
   APP_BASE_URL: z.string().url(),
+  // Host del CRM cuando la web pública vive en la raíz del dominio. Si falta,
+  // se deriva de APP_BASE_URL y, en su defecto, de la convención `admin.*`
+  // (ver src/lib/hosts.ts).
+  ADMIN_HOST: z.string().optional(),
+  // URL absoluta de la web pública, para canonical y Open Graph. Si falta se
+  // deriva de APP_BASE_URL quitándole el prefijo `admin.`.
+  SITE_BASE_URL: z.string().url().optional(),
   DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRET: z.string().min(16),
   ENCRYPTION_KEY: z

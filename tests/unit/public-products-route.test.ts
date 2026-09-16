@@ -49,6 +49,7 @@ describe("GET /api/public/products", () => {
         precioUnitarioNeto: 370,
         precioBolsaNeto: 2220,
         precioBolsaConIva: 2641.8,
+        imagen: null,
         activo: true,
         notas: null,
       },

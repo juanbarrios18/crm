@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import { accentCssVariables, DEFAULT_BRANDING } from "@/lib/branding";
 import { getBranding } from "@/server/branding";
-import "./globals.css";
+import "../globals.css";
 
 // next/font descarga la fuente en BUILD y la sirve self-hosted (sin CDN).
 const geist = Geist({

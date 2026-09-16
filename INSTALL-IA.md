@@ -48,7 +48,8 @@
 | `OPENROUTER_API_TOKEN` | del usuario (si lo dio) |
 | `OPENROUTER_MODEL` | si hay token: sugiere `anthropic/claude-sonnet-4.5` u otro a elección |
 
-`DOMAIN` solo aplica en la Ruta B (para Caddy).
+`SITE_DOMAIN` y `ADMIN_DOMAIN` solo aplican en la Ruta B (para Caddy):
+son los dos dominios que Caddy resuelve con HTTPS automático.
 
 ## Ruta A — Coolify (con el MCP de Coolify)
 
@@ -77,7 +78,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-- Caddy emite el certificado HTTPS automáticamente con `DOMAIN`.
+- Caddy emite un certificado HTTPS por cada dominio de `SITE_DOMAIN` y
+  `ADMIN_DOMAIN`.
 - Verifica: `docker compose ps` (tres servicios healthy) y
   `https://<dominio>/api/health` → `{"ok":true}`.
 

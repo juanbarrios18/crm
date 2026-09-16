@@ -38,6 +38,8 @@ export type ProductInput = {
   formato: string;
   unidadesPorBolsa: number;
   precioBolsaNeto: number;
+  /** Ruta o URL de la foto pública. Null → placeholder en el catálogo. */
+  imagen: string | null;
   activo: boolean;
   notas: string | null;
 };
@@ -157,6 +159,7 @@ export async function createProduct(
         precioUnitarioNeto: String(precioUnitarioNeto),
         precioBolsaNeto: String(input.precioBolsaNeto),
         precioBolsaConIva: String(precioBolsaConIva),
+        imagen: input.imagen,
         activo: input.activo,
         notas: input.notas,
       })
@@ -217,6 +220,7 @@ export async function updateProduct(
         precioUnitarioNeto: String(precioUnitarioNeto),
         precioBolsaNeto: String(precioBolsaNeto),
         precioBolsaConIva: String(precioBolsaConIva),
+        imagen: input.imagen !== undefined ? input.imagen : current.imagen,
         activo: input.activo ?? current.activo,
         notas: input.notas !== undefined ? input.notas : current.notas,
         updatedAt: new Date(),

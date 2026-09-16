@@ -64,6 +64,13 @@
       "when": 1789507540463,
       "tag": "0008_crazy_beyonder",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789514081912,
+      "tag": "0009_solid_madame_hydra",
+      "breakpoints": true
     }
   ]
 }

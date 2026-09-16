@@ -4,7 +4,7 @@ import { upsertZone } from "@/server/catalog/queries";
 /**
  * 005 — Import idempotente de zonas de envío desde CSV.
  *
- * Formato esperado (CSV de Lamas Foods):
+ * Formato esperado (CSV de LamasFoods):
  * comuna,costo_despacho_neto,activo,notas
  *
  * El costo es la tarifa PÚBLICA que paga el cliente. `activo` en SI/NO.

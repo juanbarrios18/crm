@@ -8,13 +8,80 @@ agencia adaptando Vocero para un cliente).
 ## Stack
 
 **Next.js 15 (App Router) + React 19** en monolito · TypeScript estricto
-(`strict` + `noUncheckedIndexedAccess`) · Tailwind CSS (tema oscuro propio,
-acento `#25D366`) · **PostgreSQL + Drizzle ORM** (migraciones versionadas en
+(`strict` + `noUncheckedIndexedAccess`) · Tailwind CSS (**tema claro "Atlas"**,
+acento acero `#3f5972` por defecto y configurable por organización; la web
+pública usa su propia paleta cálida scopeada bajo `.site`) · **PostgreSQL +
+Drizzle ORM** (migraciones versionadas en
 `drizzle/`, aplicadas al ARRANCAR el contenedor) · **Better Auth** + plugin
 organization · **Zod** en todo input externo · nanoid con prefijos (`ct_`,
 `cv_`, `msg_`…) · pnpm · Vitest (unit) + guiones E2E en `tests/e2e/` conducidos
 con Playwright · Docker multi-stage (standalone, healthcheck `/api/health`) ·
 deploy en Coolify (Ruta A) o docker compose + Caddy (Ruta B).
+
+## Dos superficies, un despliegue (ruteo por host)
+
+Una instancia sirve **la web pública de la marca** en la raíz del dominio y **el
+CRM** en `admin.<dominio>`, con el mismo Next.js. Lo resuelve
+`src/middleware.ts`:
+
+- Host del CRM (`ADMIN_HOST`, o el de `APP_BASE_URL`, o `admin.*`) → rutas del
+  CRM tal cual; `/` redirige a `/inbox`.
+- Host de infraestructura (IP literal, nombre interno de Docker, o `localhost`
+  cuando el CRM está configurado en otro host) → también CRM. Sin esta guarda,
+  el webhook de WhatsApp y el resto de `/api/*` responderían 404 según con qué
+  Host llegue el request.
+- Cualquier otro host → web pública: reescribe a las rutas internas `/site…` y
+  agrega `Cache-Control` para que el proxy sirva el HTML.
+
+`/site` es una ruta INTERNA, no una URL pública: en el host público se redirige
+a su forma canónica.
+
+**Invariante: un visitante de la web pública nunca llega al admin.** Ni por un
+enlace, ni por un 404, ni por un 500, ni por una redirección. En el host público
+`/inbox`, `/login` y el resto del CRM responden 404 con la página de error de la
+marca; el admin solo existe en su propio host. `error.tsx` (sitio y CRM),
+`(site)/site/not-found.tsx` y `global-not-found.tsx` son las piezas que lo
+sostienen, y el self-test lo verifica explícitamente.
+
+Ojo: las páginas de `error.tsx` son *client components* por contrato de Next, así
+que su HTML inicial va vacío y se pintan al hidratar. Un visitante con navegador
+las ve completas; sin JS vería el 500 pelado. Es una limitación del framework,
+no una decisión nuestra.
+
+**El sitio vive en la RAÍZ del dominio**; su prefijo interno `/site` es solo
+cómo se monta el árbol de rutas para no chocar con el CRM, y el middleware lo
+reescribe. Consecuencia importante: **los `href` del sitio son absolutos a la
+raíz** (`/catalogo`). Si se previsualiza el sitio en una ruta con prefijo, esos
+enlaces se van al CRM. Por eso en desarrollo el sitio se sirve en la raíz, igual
+que en producción:
+
+```bash
+# .env (desarrollo) — el CRM en su propio host, el sitio en localhost
+APP_BASE_URL=http://admin.localhost:3000
+```
+
+Con eso: web pública en `http://localhost:3000` y CRM en
+`http://admin.localhost:3000` (los `*.localhost` resuelven a loopback por RFC
+6761). Los enlaces internos funcionan porque el sitio está en la raíz.
+
+`localhost` se trata como CRM **solo** cuando `APP_BASE_URL` apunta a
+`localhost` (el setup simple de un solo puerto); ahí el sitio se previsualiza en
+`/site`, pero **navegando con sus enlaces no funciona** (es la limitación
+descrita arriba). Las IPs (`127.0.0.1`) y los nombres internos de Docker son
+infraestructura SIEMPRE: el webhook se entrega por loopback y no puede depender
+del host.
+
+Para verificar el ruteo sin tocar `.env` se fuerza el host con el header, que es
+lo que setea el proxy en producción:
+
+```bash
+curl -H "Host: lamasfood.cl" http://localhost:3000/          # web pública
+curl -H "Host: admin.lamasfood.cl" http://localhost:3000/    # CRM
+```
+
+`ADMIN_HOST` y `SITE_BASE_URL` son opcionales y se documentan en `.env.example`.
+Sin proxy, `x-forwarded-host` es falsificable: el CRM siempre exige sesión, la
+protección de rutas es de SEO/UX, no un límite de seguridad.
 
 Tiempo real por **SSE** (`/api/events`): heartbeat `: ping` ~25s, headers
 anti-buffering, catch-up por refetch con `since=`. Sin WebSockets, sin colas
@@ -33,11 +100,21 @@ externas: el trabajo en segundo plano (agente, Laboratorio) es in-process.
 | La ingesta/envío de mensajes | `src/server/inbox/` (ingest idempotente, send con guard de sandbox, ventana 24h) |
 | Cómo se identifica a un contacto | `src/server/inbox/identity.ts` (teléfono normalizado o `bsuid:<id>`) |
 | Conectar TU propio bot en vez del agente | `src/app/api/bot/*` + `src/server/bot/auth.ts` (X-API-Key) |
-| UI | `src/components/` + `src/app/(app)/` |
+| La web pública (landing, catálogo, SEO) | `src/app/(site)/` + `src/components/site/` + `src/content/lamasfood.ts` |
+| Qué host sirve qué superficie | `src/middleware.ts` + `src/lib/hosts.ts` |
+| Textos/marca de la web pública | `src/content/lamasfood.ts` (placeholders marcados `REEMPLAZAR`) |
+| La foto de un producto | `src/app/api/products/[id]/image/` (subida) + `src/app/api/public/media/` (serving) |
+| UI del CRM | `src/components/` + `src/app/(crm)/(app)/` |
+
+Los dos root layouts (`(crm)` y `(site)`) existen a propósito: el del CRM declara
+`force-dynamic` y lee branding de la base, así que compartirlo haría dinámica a
+la web pública y filtraría el título del CRM a los buscadores. Next.js permite
+varios root layouts justamente cuando no hay un `app/layout.tsx` único.
 
 Los mocks del entorno de pruebas viven en `src/app/api/dev/` (wa-mock +
 ai-mock) tras un gate único (`src/lib/dev-guard.ts`): 404 incondicional en
-producción.
+producción. Por eso **el self-test E2E corre contra `pnpm dev`, nunca contra un
+build de producción**.
 
 **Identidad de contacto**: Meta está migrando de teléfono a Business-Scoped
 User IDs, así que `from` puede no venir. La llave estable es
@@ -84,9 +161,19 @@ Gate técnico:
 pnpm typecheck && pnpm lint && pnpm build && pnpm test
 ```
 
-Guiones E2E por historia en `tests/e2e/*.md`. Con la app viva y los mocks
-encendidos, `pnpm test:e2e` (`scripts/e2e-selftest.mjs`) los conduce contra la
-app real y sale distinto de cero si algo falla. Al agregar una historia,
+Guiones E2E por historia en `tests/e2e/*.md`. Con la app viva con **`pnpm dev`**
+(no un build de producción: los mocks dan 404 en `NODE_ENV=production`) y los
+mocks encendidos, `pnpm test:e2e` (`scripts/e2e-selftest.mjs`) los conduce contra
+la app real y sale distinto de cero si algo falla.
+
+**El E2E no es idempotente sobre una base ya usada**: los mocks reusan
+`waMessageId` fijos, así que re-correrlo contra la misma base choca con
+`message_wa_message_id_unique` y produce fallos fantasma. Para una corrida
+limpia, apuntá el self-test a una base recién migrada y sembrada. Además, los
+primeros requests de cada ruta en `next dev` compilan on-demand: un 500 aislado
+en la PRIMERA ejecución de una ruta suele ser ese cold start, no un bug.
+
+Al agregar una historia,
 extiende el arnés en vez de dejar solo el `.md`.
 
 ## Modo Objetivo — Loop SDD
