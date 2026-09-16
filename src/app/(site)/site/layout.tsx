@@ -71,7 +71,25 @@ export const metadata: Metadata = {
     description: SEO.defaultDescription,
     images: [SEO.ogImage],
   },
-  robots: { index: true, follow: true },
+  /*
+   * TEMPORAL: `noindex` hasta que el negocio confirme los datos de contacto.
+   *
+   * El sitio está publicado con `CONTACT` en placeholder (teléfono, WhatsApp,
+   * dirección y correo falsos), así que indexarlo dejaría en Google un teléfono
+   * que no existe. Volver a `{ index: true, follow: true }` cuando esos datos
+   * estén reales y verificados.
+   *
+   * Se resuelve con el meta tag y NO tocando `robots.txt`, a propósito: para que
+   * Google respete un `noindex` tiene que poder ENTRAR a la página. Si se bloquea
+   * el crawl, el buscador nunca lee la directiva y —si la URL ya era conocida—
+   * queda como "indexada aunque bloqueada por robots.txt", que es peor que no
+   * hacer nada. Por eso `src/app/robots.ts` sigue con `Allow: /`.
+   *
+   * El `sitemap.xml` también queda como está: lista URLs que ahora responden
+   * `noindex`, y Google prioriza el `noindex`. Vaciar el sitemap no agrega
+   * protección y rompería el invariante que verifica el E2E.
+   */
+  robots: { index: false, follow: false },
 };
 
 /** La panadería como entidad: se declara una vez y aplica a todo el sitio. */
