@@ -26,8 +26,27 @@ export function parseLocalPrice(raw: string): number {
   return value;
 }
 
-/** Campos visibles al cliente (catálogo de venta). Strict: un campo desconocido falla. */
-export const PublicProductSchema = z
+/**
+ * Referencia de imagen aceptable para la web pública.
+ *
+ * Solo rutas internas (`/...`) o URLs `http(s)://`. Se rechazan `javascript:`,
+ * `data:` y los esquemas relativos al protocolo (`//host`), porque el valor
+ * termina en un `src` de la web pública: uno hostil sería XSS almacenado.
+ */
+export function isSafeImageRef(value: string): boolean {
+  if (value.length === 0 || value.length > 2048) return false;
+  // `//host/x.jpg` es relativo al protocolo: se sirve desde otro origen.
+  if (value.startsWith("//")) return false;
+  if (value.startsWith("/")) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Campos visibles al cliente (catálogo de venta). Strict: un campo desconocido falla. */export const PublicProductSchema = z
   .object({
     producto: z.string(),
     masa: z.string(),
@@ -36,6 +55,8 @@ export const PublicProductSchema = z
     precioUnitarioNeto: z.number(),
     precioBolsaNeto: z.number(),
     precioBolsaConIva: z.number(),
+    /** Ruta o URL de la foto para la web pública. Null → placeholder. */
+    imagen: z.string().nullable(),
     activo: z.boolean(),
     notas: z.string().nullable(),
   })
@@ -59,6 +80,7 @@ type ProductRow = {
   precioUnitarioNeto: string | null;
   precioBolsaNeto: string | null;
   precioBolsaConIva: string | null;
+  imagen: string | null;
   activo: boolean;
   notas: string | null;
 };
@@ -78,6 +100,7 @@ export function serializePublicProduct(row: ProductRow): PublicProduct {
     precioUnitarioNeto: Number(row.precioUnitarioNeto),
     precioBolsaNeto: Number(row.precioBolsaNeto),
     precioBolsaConIva: Number(row.precioBolsaConIva),
+    imagen: row.imagen,
     activo: row.activo,
     notas: row.notas,
   });

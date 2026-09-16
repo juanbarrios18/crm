@@ -1,6 +1,25 @@
-# HTTPS automático con el dominio de la variable DOMAIN.
-# Para pruebas locales usa DOMAIN=localhost (certificado interno).
-{$DOMAIN} {
+# ============================================================
+# HTTPS automático para los DOS dominios de la instancia (007)
+# ============================================================
+#
+# Una instancia sirve dos superficies con el MISMO servicio:
+#
+#   lamasfood.cl              → web pública (marca + catálogo)
+#   admin.lamasfood.cl        → CRM (gestión)
+#
+# Los dos nombres apuntan acá y Caddy saca un certificado por cada uno
+# automáticamente. El ruteo entre superficies NO lo hace el proxy: lo decide el
+# middleware de la app leyendo el header `Host`.
+#
+# Caddy preserva el `Host` original por defecto y además setea
+# `X-Forwarded-Host` (que es el que el middleware consulta primero), así que el
+# ruteo llega intacto. Además Caddy sobrescribe esos headers, así que un cliente
+# no puede falsificarlos desde afuera.
+#
+# Requisitos: ambos nombres resuelven a esta máquina y 80/443 están accesibles
+# desde internet (Caddy valida el dominio contra Let's Encrypt).
+
+{$SITE_DOMAIN}, {$ADMIN_DOMAIN} {
 	reverse_proxy app:3000 {
 		# SSE: sin buffering ni timeouts cortos en el proxy
 		flush_interval -1

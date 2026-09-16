@@ -12,6 +12,14 @@ services:
     restart: unless-stopped
     environment:
       APP_BASE_URL: ${APP_BASE_URL}
+      # 007 — ruteo por host. Sin estas dos, la app no sabe cuál de los dos
+      # dominios es el CRM ni cuál es la web pública, y el canonical del sitio
+      # terminaría apuntando al dominio del admin.
+      # Obligatorio cuando el dominio del admin NO es un subdominio del público
+      # (p. ej. `admin-lamasfood.duckdns.org` vs `lamasfood.duckdns.org`, que son
+      # hermanos bajo duckdns.org).
+      ADMIN_HOST: ${ADMIN_HOST:-}
+      SITE_BASE_URL: ${SITE_BASE_URL:-}
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/vocero
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
@@ -61,7 +69,8 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      DOMAIN: ${DOMAIN}
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - vocero_caddy_data:/data

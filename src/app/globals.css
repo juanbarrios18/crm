@@ -81,3 +81,50 @@
     animation-duration: 0.01ms !important;
   }
 }
+
+/*
+  ============================================================
+  Web pública (007) — identidad propia de la marca
+  ============================================================
+  Scopeada bajo `.site` (la clase del <body> del sitio público) para NO tocar
+  el tema Atlas del CRM: el acento white-label se inyecta en `:root` y queda
+  fuera de este scope. Paleta cálida derivada de la referencia de diseño.
+*/
+.site {
+  /*
+    Los tokens se declaran como canales RGB sueltos además del color armado.
+    Motivo: Tailwind v3 sólo puede aplicar modificadores de opacidad
+    (`bg-site-panel/95`) si el color de la config usa el patrón
+    `rgb(var(--x) / <alpha-value>)`. Con un `var(--color)` plano el modificador
+    NO se aplica y el fondo queda transparente en silencio.
+  */
+  --site-bg-rgb: 247 241 232;
+  --site-panel-rgb: 255 253 249;
+  --site-topbar-rgb: 239 230 216;
+  --site-text-rgb: 59 42 32;
+  --site-muted-rgb: 138 117 102;
+  --site-accent-rgb: 107 63 42;
+  --site-accent-hover-rgb: 86 49 31;
+  --site-border-rgb: 232 220 203;
+
+  --site-bg: rgb(var(--site-bg-rgb));
+  --site-panel: rgb(var(--site-panel-rgb));
+  --site-topbar: rgb(var(--site-topbar-rgb));
+  --site-text: rgb(var(--site-text-rgb));
+  --site-muted: rgb(var(--site-muted-rgb));
+  --site-accent: rgb(var(--site-accent-rgb));
+  --site-accent-hover: rgb(var(--site-accent-hover-rgb));
+  --site-border: rgb(var(--site-border-rgb));
+
+  background-color: var(--site-bg);
+  color: var(--site-text);
+  /* El CRM aprieta el tracking; la web pública respira distinto. */
+  letter-spacing: normal;
+}
+
+/* Foco visible: la web pública se navega con teclado igual que el CRM. */
+.site :focus-visible {
+  outline: 2px solid var(--site-accent);
+  outline-offset: 2px;
+}
+

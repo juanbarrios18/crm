@@ -502,6 +502,13 @@ export const product = pgTable(
     precioUnitarioNeto: numeric("precio_unitario_neto", { precision: 12, scale: 4 }).notNull(),
     precioBolsaNeto: numeric("precio_bolsa_neto", { precision: 12, scale: 4 }).notNull(),
     precioBolsaConIva: numeric("precio_bolsa_con_iva", { precision: 12, scale: 4 }).notNull(),
+    /**
+     * Imagen para la web pública. Guarda una RUTA o URL, nunca un binario:
+     *   - subida desde el admin → `/api/public/media/<assetId>`
+     *   - fijada a mano       → `/site/...` o una URL absoluta
+     * Nullable: un producto sin foto se muestra con el placeholder local.
+     */
+    imagen: text("imagen"),
     activo: boolean("activo").notNull().default(true),
     notas: text("notas"),
     createdAt: timestamp("created_at").notNull().defaultNow(),

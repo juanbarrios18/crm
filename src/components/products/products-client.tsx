@@ -39,6 +39,8 @@ type AdminProduct = {
   precioUnitarioNeto: number;
   precioBolsaNeto: number;
   precioBolsaConIva: number;
+  /** Ruta o URL de la foto pública. Null → el catálogo usa el placeholder. */
+  imagen: string | null;
   activo: boolean;
   notas: string | null;
 };
@@ -71,6 +73,11 @@ export function ProductsClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /* Foto del producto que se está editando. No viaja en el payload del form:
+   * se sube por su propia ruta (`/api/products/:id/image`). */
+  const [imageRef, setImageRef] = useState<string | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
     const res = await fetch("/api/products").catch(() => null);
@@ -92,6 +99,8 @@ export function ProductsClient() {
   function resetForm() {
     setForm(EMPTY_PRODUCT);
     setEditingId(null);
+    setImageRef(null);
+    setImageError(null);
   }
 
   function openCreate() {
@@ -111,6 +120,8 @@ export function ProductsClient() {
       activo: p.activo,
       notas: p.notas ?? "",
     });
+    setImageRef(p.imagen);
+    setImageError(null);
     setFormError(null);
     setSheetOpen(true);
   }
@@ -161,8 +172,51 @@ export function ProductsClient() {
     void refetch();
   }
 
-  async function remove(p: AdminProduct) {
-    if (
+  /** Sube la foto del producto en edición. Requiere que ya exista (tiene id). */
+  async function uploadImage(file: File) {
+    if (!editingId) return;
+    setImageBusy(true);
+    setImageError(null);
+
+    const body = new FormData();
+    body.append("file", file);
+    const res = await fetch(`/api/products/${editingId}/image`, {
+      method: "POST",
+      body,
+    }).catch(() => null);
+
+    setImageBusy(false);
+    if (!res?.ok) {
+      setImageError(
+        (await readErrorMessage(res)) ?? "No se pudo subir la foto"
+      );
+      return;
+    }
+    const data = (await res.json()) as { imagen: string | null };
+    setImageRef(data.imagen);
+    void refetch();
+  }
+
+  async function removeImage() {
+    if (!editingId) return;
+    setImageBusy(true);
+    setImageError(null);
+    const res = await fetch(`/api/products/${editingId}/image`, {
+      method: "DELETE",
+    }).catch(() => null);
+
+    setImageBusy(false);
+    if (!res?.ok) {
+      setImageError(
+        (await readErrorMessage(res)) ?? "No se pudo quitar la foto"
+      );
+      return;
+    }
+    setImageRef(null);
+    void refetch();
+  }
+
+  async function remove(p: AdminProduct) {    if (
       !window.confirm(
         `¿Eliminar "${p.producto} · ${p.masa} · ${p.formato}"? Esta acción no se puede deshacer.`
       )
@@ -361,6 +415,69 @@ export function ProductsClient() {
               </span>
             </p>
           )}
+          <div className="space-y-2">
+            <Label htmlFor="prod-imagen">Foto para la web pública</Label>
+            {editingId ? (
+              <div className="flex items-start gap-4">
+                <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-subtle">
+                  {imageRef ? (
+                    // El valor puede ser una URL externa fijada por API, así que
+                    // no se usa next/image (exigiría declarar cada dominio).
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={imageRef}
+                      alt="Foto actual del producto"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="px-2 text-center text-xs text-text-3">
+                      Sin foto
+                    </span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Input
+                    id="prod-imagen"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={imageBusy}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void uploadImage(file);
+                      // Permite volver a elegir el mismo archivo.
+                      e.target.value = "";
+                    }}
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-text-3">
+                      jpeg, png o webp · máx. 5 MB
+                    </p>
+                    {imageRef && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={imageBusy}
+                        onClick={() => void removeImage()}
+                      >
+                        Quitar
+                      </Button>
+                    )}
+                  </div>
+                  {imageBusy && (
+                    <p className="text-xs text-text-3">Procesando…</p>
+                  )}
+                  {imageError && (
+                    <p className="text-xs text-destructive">{imageError}</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-text-3">
+                Guardá el producto primero: la foto se sube sobre un producto ya
+                creado.
+              </p>
+            )}
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="prod-notas">Notas (opcional)</Label>
             <Textarea

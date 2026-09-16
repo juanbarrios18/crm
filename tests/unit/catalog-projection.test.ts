@@ -18,6 +18,7 @@ const PUBLIC_ROW = {
   precioUnitarioNeto: "370.0000",
   precioBolsaNeto: "2220.0000",
   precioBolsaConIva: "2641.8000",
+  imagen: null,
   activo: true,
   notas: null,
 };
@@ -63,6 +64,7 @@ describe("PublicProductSchema", () => {
       precioUnitarioNeto: 380,
       precioBolsaNeto: 4560,
       precioBolsaConIva: 5426.4,
+      imagen: null,
       activo: true,
       notas: null,
       costo: 2500, // campo interno que no debería pasar

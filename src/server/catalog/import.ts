@@ -6,7 +6,7 @@ import { parseLocalPrice } from "@/lib/catalog";
 /**
  * 005 — Import idempotente del catálogo desde CSV.
  *
- * Formato esperado (igual al CSV de Lamas Foods):
+ * Formato esperado (igual al CSV de LamasFoods):
  * producto,masa,formato,unidades_por_bolsa,precio_unitario_neto,precio_bolsa_neto,precio_bolsa_con_iva,activo,notas
  *
  * Precios en formato local chileno ("2641,8", "2.641,8") → normalizados.

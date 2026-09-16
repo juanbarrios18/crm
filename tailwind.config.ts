@@ -56,6 +56,21 @@ const config: Config = {
         "text-2": "var(--text-2)",
         "text-3": "var(--text-3)",
         "text-4": "var(--text-4)",
+        // Web pública (007): paleta cálida propia, scopeada bajo `.site` para no
+        // pelear con el tema Atlas ni con el acento white-label del CRM.
+        // Se declaran con `<alpha-value>` para que los modificadores de opacidad
+        // (`bg-site-panel/95`) funcionen: con un `var()` plano Tailwind los
+        // ignora en silencio y el fondo queda transparente.
+        site: {
+          bg: "rgb(var(--site-bg-rgb) / <alpha-value>)",
+          panel: "rgb(var(--site-panel-rgb) / <alpha-value>)",
+          topbar: "rgb(var(--site-topbar-rgb) / <alpha-value>)",
+          text: "rgb(var(--site-text-rgb) / <alpha-value>)",
+          muted: "rgb(var(--site-muted-rgb) / <alpha-value>)",
+          accent: "rgb(var(--site-accent-rgb) / <alpha-value>)",
+          "accent-hover": "rgb(var(--site-accent-hover-rgb) / <alpha-value>)",
+          border: "rgb(var(--site-border-rgb) / <alpha-value>)",
+        },
         chat: "var(--chat-bg)",
         "bubble-out": "var(--bubble-out)",
         "bubble-out-text": "var(--bubble-out-text)",
@@ -74,6 +89,8 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-geist)", "Hanken Grotesk", "-apple-system", "sans-serif"],
+        // Titulares de la web pública: serif con más carácter, self-hosted.
+        display: ["var(--font-display)", "Georgia", "Times New Roman", "serif"],
       },
     },
   },

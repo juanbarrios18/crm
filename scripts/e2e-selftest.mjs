@@ -769,6 +769,256 @@ async function main() {
     JSON.stringify(unsub.json)
   );
 
+  console.log("\n== 007: sitio público LamasFood y ruteo por host ==");
+
+  /*
+   * El sitio es anónimo, así que se pide SIN cookie. El host se fuerza con
+   * `x-forwarded-host` (que es como lo setea el proxy en producción y lo que el
+   * middleware prioriza), así se prueban las dos superficies sin tocar DNS.
+   */
+  const SITE = { "x-forwarded-host": "lamasfood.cl" };
+  const ADMIN = { "x-forwarded-host": "admin.lamasfood.cl" };
+
+  async function get(path, headers = {}) {
+    const res = await fetch(`${BASE}${path}`, { headers, redirect: "manual" });
+    const text = await res.text().catch(() => "");
+    return { res, text };
+  }
+
+  const landing = await get("/", SITE);
+  ok("host público: GET / → 200", landing.res.status === 200, `status=${landing.res.status}`);
+  ok(
+    "host público: la landing es de LamasFood, no del CRM",
+    landing.text.includes("LamasFood") &&
+      !landing.text.includes("Sistema de gestión"),
+    landing.text.slice(0, 120)
+  );
+  ok(
+    "host público: un solo <h1> (HTML semántico)",
+    (landing.text.match(/<h1/g) ?? []).length === 1,
+    `h1=${(landing.text.match(/<h1/g) ?? []).length}`
+  );
+  const landingCache = landing.res.headers.get("cache-control") ?? "";
+  /*
+   * En `next dev` Next.js fuerza `no-store, must-revalidate` en las respuestas,
+   * así que el `s-maxage` que pone el middleware solo se observa contra un build
+   * de producción (`next start`), donde se verificó. Acá se acepta cualquiera de
+   * las dos: lo que se prueba en dev es que la respuesta NO salga sin política.
+   */
+  ok(
+    "host público: la respuesta declara una política de caché explícita",
+    /s-maxage=\d+/.test(landingCache) || landingCache.includes("no-store"),
+    landingCache || "(sin cache-control)"
+  );
+
+  const catalog = await get("/catalogo", SITE);
+  ok("host público: GET /catalogo → 200", catalog.res.status === 200, `status=${catalog.res.status}`);
+  ok(
+    "catálogo: expone los productos del catálogo real",
+    pubProds.some((p) => catalog.text.includes(p.producto)),
+    `productos=${pubProds.length}`
+  );
+  ok(
+    "catálogo: datos estructurados ItemList para SEO",
+    catalog.text.includes('"@type":"ItemList"') && catalog.text.includes('"@type":"Product"')
+  );
+
+  /*
+   * Guard del requisito: el catálogo público NO publica precios; los cotiza el
+   * agente por WhatsApp. No alcanza con que la ficha no los pinte — Next
+   * serializa los props de los componentes de servidor en el HTML (payload RSC),
+   * así que se busca el precio en TODO el HTML servido.
+   * Se chequean nombres de campo (inequívocos) y valores con decimales (un
+   * entero corto daría falsos positivos: `fontWeight:400`).
+   */
+  const priceFields = ["precioBolsaConIva", "precioBolsaNeto", "precioUnitarioNeto"];
+  const priceValues = pubProds
+    .flatMap((p) => priceFields.map((f) => String(p[f])))
+    .filter((v) => v.includes("."));
+  const priceLeaks = [
+    ...priceFields.filter((f) => catalog.text.includes(f)),
+    ...priceValues.filter((v) => catalog.text.includes(v)),
+  ];
+  ok(
+    "catálogo: no filtra precios en el HTML (ni campos ni valores)",
+    priceLeaks.length === 0,
+    priceLeaks.slice(0, 3).join(", ")
+  );
+  ok(
+    "catálogo: los datos estructurados no publican precio",
+    !catalog.text.includes('"price"') && !catalog.text.includes("priceCurrency")
+  );
+
+  // Aislamiento entre superficies: el dominio público no expone el CRM.
+  for (const p of ["/inbox", "/login", "/api/products", "/api/events"]) {
+    const r = await get(p, SITE);
+    ok(`host público: ${p} → 404 (no se expone)`, r.res.status === 404, `status=${r.res.status}`);
+  }
+
+  /*
+   * Guard explícito del requisito: un visitante de la web pública NUNCA debe
+   * terminar en el admin. No alcanza con el status — una redirección a /inbox o
+   * /login también lo llevaría ahí, así que se exige que no haya `location`.
+   */
+  const leaks = [];
+  for (const p of ["/inbox", "/login", "/", "/catalogo", "/no-existe"]) {
+    const r = await get(p, SITE);
+    const loc = r.res.headers.get("location") ?? "";
+    if (loc.includes("/inbox") || loc.includes("/login")) leaks.push(`${p} → ${loc}`);
+  }
+  ok(
+    "host público: nada redirige al admin (ni /inbox ni /login)",
+    leaks.length === 0,
+    leaks.join(", ")
+  );
+
+  const canon = await get("/site", SITE);
+  ok(
+    "host público: /site redirige a su forma canónica (sin contenido duplicado)",
+    canon.res.status === 308 && (canon.res.headers.get("location") ?? "").endsWith("/"),
+    `status=${canon.res.status} loc=${canon.res.headers.get("location")}`
+  );
+
+  ok(
+    "host público: /api/public/products sigue disponible",
+    (await get("/api/public/products", SITE)).res.status === 200
+  );
+  ok(
+    "healthcheck responde en AMBOS hosts (no depende del ruteo)",
+    (await get("/api/health", SITE)).res.status === 200 &&
+      (await get("/api/health", ADMIN)).res.status === 200
+  );
+
+  // robots/sitemap por host.
+  const robotsPublic = (await get("/robots.txt", SITE)).text;
+  const robotsAdmin = (await get("/robots.txt", ADMIN)).text;
+  ok(
+    "robots.txt público: permite indexar y bloquea solo /api/",
+    robotsPublic.includes("Allow: /") && robotsPublic.includes("Disallow: /api/"),
+    robotsPublic.replace(/\n/g, "|")
+  );
+  ok(
+    "robots.txt admin: bloquea todo",
+    robotsAdmin.includes("Disallow: /") && !robotsAdmin.includes("Allow: /"),
+    robotsAdmin.replace(/\n/g, "|")
+  );
+  const sitemapPublic = (await get("/sitemap.xml", SITE)).text;
+  const sitemapAdmin = (await get("/sitemap.xml", ADMIN)).text;
+  ok(
+    "sitemap público: lista la landing y el catálogo",
+    sitemapPublic.includes("<loc>") && sitemapPublic.includes("/catalogo")
+  );
+  ok("sitemap admin: vacío (el CRM no se indexa)", !sitemapAdmin.includes("<loc>"));
+
+  // El subdominio de gestión no sirve el sitio público.
+  ok(
+    "host admin: /site → 404",
+    (await get("/site", ADMIN)).res.status === 404,
+    `status=${(await get("/site", ADMIN)).res.status}`
+  );
+
+  // Camino infeliz: ruta inexistente del sitio.
+  const missing = await get("/catalogo/no-existe", SITE);
+  ok(
+    "camino infeliz: ruta inexistente del sitio → 404",
+    missing.res.status === 404,
+    `status=${missing.res.status}`
+  );
+  /*
+   * El status solo no alcanza: sin el catch-all, Next sirve su 404 por defecto
+   * (sin layout, sin marca) y el check pasaba igual. Acá se exige que la página
+   * salga con la marca del sitio y SIN filtrar el CRM.
+   */
+  ok(
+    "ese 404 sale con la marca del sitio, no el 404 pelado de Next",
+    missing.text.includes("No encontramos esta página") &&
+      missing.text.includes("LamasFood") &&
+      !missing.text.includes("Sistema de gestión"),
+    `${missing.text.length} bytes`
+  );
+
+  console.log("\n-- 007: foto de producto (US3) --");
+  const adminProds = (await api("/api/products")).json?.products ?? [];
+  const target = adminProds[0];
+  ok("hay un producto para probar la foto", Boolean(target), JSON.stringify(adminProds[0]));
+
+  if (target) {
+    // Un PNG real de 1×1: se sube, se sirve público y se borra.
+    const PNG = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64"
+    );
+    const form = new FormData();
+    form.append("file", new Blob([PNG], { type: "image/png" }), "e2e.png");
+
+    const upload = await fetch(`${BASE}/api/products/${target.id}/image`, {
+      method: "POST",
+      headers: { origin: BASE, cookie },
+      body: form,
+    });
+    const uploadJson = await upload.json().catch(() => null);
+    ok("POST /api/products/:id/image → 200", upload.ok, `status=${upload.status}`);
+    ok(
+      "la imagen queda referenciada por una ruta pública",
+      typeof uploadJson?.imagen === "string" &&
+        uploadJson.imagen.startsWith("/api/public/media/"),
+      JSON.stringify(uploadJson?.imagen)
+    );
+
+    const assetId = String(uploadJson?.imagen ?? "").split("/").pop();
+    const served = await fetch(`${BASE}/api/public/media/${assetId}`);
+    ok(
+      "la foto se sirve SIN sesión (es pública)",
+      served.status === 200 && (served.headers.get("content-type") ?? "").includes("image/png"),
+      `status=${served.status} type=${served.headers.get("content-type")}`
+    );
+    ok(
+      "la foto pública se cachea de forma inmutable",
+      (served.headers.get("cache-control") ?? "").includes("immutable"),
+      served.headers.get("cache-control") ?? "(sin cache-control)"
+    );
+
+    const afterUpload = (await get("/catalogo", SITE)).text;
+    ok(
+      "el catálogo público refleja la foto sin esperar la revalidación",
+      afterUpload.includes(assetId)
+    );
+
+    const bad = new FormData();
+    bad.append("file", new Blob([Buffer.from("no soy una imagen")], { type: "text/plain" }), "x.txt");
+    const badRes = await fetch(`${BASE}/api/products/${target.id}/image`, {
+      method: "POST",
+      headers: { origin: BASE, cookie },
+      body: bad,
+    });
+    ok(
+      "camino infeliz: subir un tipo no soportado → 415",
+      badRes.status === 415,
+      `status=${badRes.status}`
+    );
+
+    const noAuth = await fetch(`${BASE}/api/products/${target.id}/image`, {
+      method: "DELETE",
+    });
+    ok(
+      "camino infeliz: borrar la foto sin sesión → 401",
+      noAuth.status === 401,
+      `status=${noAuth.status}`
+    );
+
+    const del = await fetch(`${BASE}/api/products/${target.id}/image`, {
+      method: "DELETE",
+      headers: { origin: BASE, cookie },
+    });
+    ok("DELETE /api/products/:id/image → 200", del.ok, `status=${del.status}`);
+    const goneServed = await fetch(`${BASE}/api/public/media/${assetId}`);
+    ok(
+      "la foto ya no se sirve después de quitarla",
+      goneServed.status === 404,
+      `status=${goneServed.status}`
+    );
+  }
+
   console.log(`\n===== ${checks - failures}/${checks} checks OK, ${failures} fallos =====`);
   process.exit(failures > 0 ? 1 : 0);
 }

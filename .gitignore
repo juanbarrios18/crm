@@ -25,6 +25,7 @@ pnpm-debug.log*
 .cache/
 tmp/
 .tmp/
+.tmp-instagram/
 
 # --- OS / editor ---
 .DS_Store
