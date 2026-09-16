@@ -29,8 +29,8 @@ export default function CrmError({
         No se pudo cargar esta pantalla
       </h1>
       <p className="max-w-md text-sm leading-relaxed text-text-2">
-        El error quedó registrado en la consola del servidor. Probá de nuevo; si
-        persiste, revisá los logs del contenedor.
+        El error quedó registrado en la consola del servidor. Pruebe de nuevo; si
+        persiste, revise los logs del contenedor.
       </p>
       <button
         type="button"

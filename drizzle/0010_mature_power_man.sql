@@ -1,0 +1,1 @@
+ALTER TABLE "agent_test_case" ADD COLUMN "repeat_index" integer DEFAULT 0 NOT NULL;

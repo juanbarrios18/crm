@@ -40,7 +40,7 @@ rollback sin rebuild (ver abajo).
 ## Runbook de redeploy manual (fallback)
 
 El flujo normal es el CI automático. Este runbook solo aplica si el CI no está
-disponible o querés desplegar sin pushear a `main`. Desde el repo local
+disponible o se quiere desplegar sin pushear a `main`. Desde el repo local
 (`/home/juanbarrios18/Development/crm`), con los cambios ya en el working tree:
 
 ```bash
@@ -150,5 +150,5 @@ ssh vocero 'cd /opt/vocero && docker compose up -d'
   `VAPID_SUBJECT`) van en `/opt/vocero/.env` **y** deben estar expuestas en el
   servicio `app` de `/opt/vocero/docker-compose.yml`. Sin ellas el push degrada
   en silencio (el toggle pide permiso pero nunca suscribe). El CI no sincroniza
-  el compose: si cambiás `docker-compose.yml` en el repo, copialo al VPS
-  (`scp docker-compose.yml vocero:/opt/vocero/`) y corré `docker compose up -d`.
+  el compose: si se cambia `docker-compose.yml` en el repo, copiarlo al VPS
+  (`scp docker-compose.yml vocero:/opt/vocero/`) y correr `docker compose up -d`.

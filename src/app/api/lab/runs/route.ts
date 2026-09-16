@@ -7,7 +7,14 @@ import { RunConflictError, startRun } from "@/server/lab/runner";
 
 export const dynamic = "force-dynamic";
 
-/** Historial de corridas con delta de score vs la anterior (FR-033). */
+/**
+ * Historial de corridas con delta de score vs la anterior (FR-033).
+ *
+ * El score es el promedio de las medianas por persona. El delta solo es
+ * comparable entre corridas medidas con el MISMO número de repeticiones por
+ * persona: cruzarlo entre corridas de una repetición (anteriores) y corridas de
+ * N repeticiones mezcla instrumentos distintos y no es atribuible.
+ */
 export const GET = withAuth(async (session) => {
   const db = getDb();
   const runs = await db

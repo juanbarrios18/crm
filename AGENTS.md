@@ -5,6 +5,33 @@ Laboratorio de auto-evaluación. Una instancia = un negocio. Esta guía gobierna
 agente de opencode para operar y **modificar** este repositorio (caso típico: una
 agencia adaptando Vocero para un cliente).
 
+## Registro e idioma de los artefactos (no negociable)
+
+Esta sección **corrige** el escape hatch del persona global (*"unless the existing
+project clearly uses another language and you are extending it"*). Ese permiso
+significa el **locale** del proyecto (español vs inglés), NUNCA su registro
+regional.
+
+- Un repo escrito en español rioplatense se extiende en **español neutro o
+  profesional**, no en más voseo.
+- **Voseo rioplatense prohibido en cualquier artefacto**: `Agregá`, `Probá`,
+  `Guardá`, `Revisá`, `Tenés`, `Podés`, `Sos`. Vale para código, UI, comentarios,
+  strings, documentación, mensajes de error y commits.
+- Un repo que ya tiene voseo **no autoriza** voseo: es deuda a limpiar, no un
+  estilo a seguir.
+
+Por superficie:
+
+| Superficie | Registro |
+|---|---|
+| CRM admin (`src/components/`, `src/app/(crm)/`) | Español neutro profesional |
+| Web pública (`src/app/(site)/`, `src/components/site/`, `src/content/`) | Español chileno, **trato de usted** |
+| Documentación (`AGENTS.md`, `docs/`) | Neutro / impersonal |
+| Agente de IA (prompt y tono) | Lo que defina la configuración del negocio |
+
+Citar el dialecto en documentación de evidencia está permitido; escribirlo como
+prosa propia no. Lo verifica `tests/unit/voice-register.test.ts` en `pnpm test`.
+
 ## Stack
 
 **Next.js 15 (App Router) + React 19** en monolito · TypeScript estricto
@@ -169,7 +196,7 @@ la app real y sale distinto de cero si algo falla.
 **El E2E no es idempotente sobre una base ya usada**: los mocks reusan
 `waMessageId` fijos, así que re-correrlo contra la misma base choca con
 `message_wa_message_id_unique` y produce fallos fantasma. Para una corrida
-limpia, apuntá el self-test a una base recién migrada y sembrada. Además, los
+limpia, apuntar el self-test a una base recién migrada y sembrada. Además, los
 primeros requests de cada ruta en `next dev` compilan on-demand: un 500 aislado
 en la PRIMERA ejecución de una ruta suele ser ese cold start, no un bug.
 
@@ -197,7 +224,7 @@ el estado durable para reanudar si se corta el contexto.
 - **`public-site-builder`** (`.opencode/agent/public-site-builder.md`) — páginas
   públicas/legales + doc de configuración de paneles externos. No toca auth/BD.
 
-Invocálos con la herramienta `task` (`subagent_type`). Cada uno mantiene
+Invocar con la herramienta `task` (`subagent_type`). Cada uno mantiene
 memoria de proyecto en `.opencode/agent-memory/<agente>/`.
 
 ## Variables de entorno

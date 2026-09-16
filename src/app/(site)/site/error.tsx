@@ -35,8 +35,8 @@ export default function SiteError({
         No pudimos cargar esta página
       </h1>
       <p className="mt-5 text-base leading-relaxed text-site-muted">
-        Fue un problema de nuestro lado, no tuyo. Probá de nuevo en un momento
-        o escribinos y lo resolvemos.
+        Fue un problema de nuestro lado, no suyo. Pruebe de nuevo en un momento
+        o escríbanos y lo resolvemos.
       </p>
       <div className="mt-8 flex flex-wrap gap-3">
         <button

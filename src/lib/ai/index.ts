@@ -58,9 +58,9 @@ export function testProviderGuard(baseUrl: string): string | null {
   if (isLocalUrl(baseUrl)) return null;
   return (
     `Modo pruebas (WA_MOCK_ENABLED=true) con proveedor remoto (${baseUrl}): el ` +
-    "entorno de pruebas no puede apuntar a una API real. Poné " +
-    "OPENROUTER_BASE_URL=http://localhost:3000/api/dev/ai-mock, o apagá " +
-    "WA_MOCK_ENABLED si querés una corrida real deliberada."
+    "entorno de pruebas no puede apuntar a una API real. Ponga " +
+    "OPENROUTER_BASE_URL=http://localhost:3000/api/dev/ai-mock, o apague " +
+    "WA_MOCK_ENABLED si quiere una corrida real deliberada."
   );
 }
 
@@ -109,7 +109,7 @@ export async function chatJson<T>(
             {
               role: "system",
               content:
-                "STRICT: tu respuesta anterior no fue JSON válido según el esquema. Responde ÚNICAMENTE el objeto JSON, sin explicaciones ni markdown.",
+                "STRICT: su respuesta anterior no fue JSON válido según el esquema. Responda ÚNICAMENTE el objeto JSON, sin explicaciones ni markdown.",
             },
           ];
     const startedAt = Date.now();

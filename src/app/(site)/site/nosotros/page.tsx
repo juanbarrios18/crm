@@ -60,10 +60,10 @@ export default function NosotrosPage() {
 
         <aside className="h-fit rounded-2xl border border-site-border bg-site-panel p-6 sm:p-8">
           <h2 className="font-display text-xl font-semibold text-site-text">
-            ¿Armamos tu pedido?
+            ¿Armamos su pedido?
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-site-muted">
-            Contanos qué necesitas y te cotizamos por WhatsApp, según el volumen y
+            Cuéntenos qué necesita y le cotizamos por WhatsApp, según el volumen y
             la frecuencia de entrega.
           </p>
           <div className="mt-6 flex flex-col gap-3">

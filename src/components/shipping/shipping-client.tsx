@@ -163,7 +163,7 @@ export function ShippingClient() {
           )}
           {!loading && zones.length === 0 && (
             <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              Sin comunas cargadas. Agregá la primera con el botón de arriba.
+              Sin comunas cargadas. Agregue la primera con el botón de arriba.
             </p>
           )}
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}

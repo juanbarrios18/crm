@@ -266,7 +266,7 @@ export function ProductsClient() {
           )}
           {!loading && products.length === 0 && (
             <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              Sin productos todavía. Agregá el primero con el botón de arriba.
+              Sin productos todavía. Agregue el primero con el botón de arriba.
             </p>
           )}
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
@@ -473,7 +473,7 @@ export function ProductsClient() {
               </div>
             ) : (
               <p className="text-xs text-text-3">
-                Guardá el producto primero: la foto se sube sobre un producto ya
+                Guarde el producto primero: la foto se sube sobre un producto ya
                 creado.
               </p>
             )}

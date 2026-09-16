@@ -71,6 +71,13 @@
       "when": 1789514081912,
       "tag": "0009_solid_madame_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789598595759,
+      "tag": "0010_mature_power_man",
+      "breakpoints": true
     }
   ]
 }
