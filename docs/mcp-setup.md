@@ -4,7 +4,7 @@ Los servidores MCP dan a Claude herramientas extra (navegador, GitHub, bases de 
 etc.). **No se instalan desde un archivo suelto**: se registran con el CLI `claude mcp add`
 o se declaran en `.mcp.json` (scope de proyecto). Este starter trae:
 
-- **`.mcp.json`** — arranca vacío (`{"mcpServers": {}}`). Lo que pongas aquí queda *scoped al
+- **`.mcp.json`** — arranca vacío (`{"mcpServers": {}}`). Lo que se declare aquí queda *scoped al
   proyecto* y se comparte con quien clone el repo.
 - **`.mcp.json.example`** — ejemplos listos: **Playwright** (navegador, para self-tests de
   UI) y **GitHub** (issues/PRs, encaja con `speckit-taskstoissues`).
@@ -22,12 +22,12 @@ claude mcp add github --env GITHUB_PERSONAL_ACCESS_TOKEN=$GITHUB_TOKEN -- npx -y
 claude mcp list
 ```
 
-Usa `--scope project` si quieres que la entrada se escriba en el `.mcp.json` del repo (y se
-comparta); por defecto el alcance es local a tu máquina.
+Usar `--scope project` cuando la entrada deba escribirse en el `.mcp.json` del repo (y se
+comparta); por defecto el alcance es local.
 
 ## Opción B — editar `.mcp.json`
 
-Copia las entradas que necesites de `.mcp.json.example` a `.mcp.json`. Formato:
+Copiar las entradas necesarias de `.mcp.json.example` a `.mcp.json`. Formato:
 
 ```json
 {
@@ -47,12 +47,12 @@ Copia las entradas que necesites de `.mcp.json.example` a `.mcp.json`. Formato:
 
 ## Reglas de seguridad (importante)
 
-- **Nunca** pongas tokens en claro en `.mcp.json`. Usa interpolación `${VAR}` que se resuelve
-  desde tu entorno / `.env`.
-- Si por algún motivo metes un secreto directo, **gitignora `.mcp.json`** y deja solo
+- **Nunca** poner tokens en claro en `.mcp.json`. Usar interpolación `${VAR}`, que se resuelve
+  desde el entorno / `.env`.
+- Si por algún motivo se incluye un secreto directo, **gitignorar `.mcp.json`** y dejar solo
   `.mcp.json.example` versionado (ver el bloque comentado en `.gitignore`).
 - Los servidores remotos autenticados (los que requieren login interactivo) pueden **no
-  estar disponibles en ejecuciones headless/cron** — tenlo en cuenta para automatizaciones.
+  estar disponibles en ejecuciones headless/cron** — tenerlo en cuenta para automatizaciones.
 
 ## Servidores MCP útiles para el loop SDD
 
@@ -61,6 +61,6 @@ Copia las entradas que necesites de `.mcp.json.example` a `.mcp.json`. Formato:
 | Playwright | Self-test de UI / navegación en la fase Verify |
 | GitHub | Crear issues desde `tasks.md`, gestionar PRs |
 | Postgres/SQLite | Inspeccionar la BD durante el desarrollo |
-| Filesystem | Acceso acotado a rutas fuera del repo (úsalo con cuidado) |
+| Filesystem | Acceso acotado a rutas fuera del repo (usarlo con cuidado) |
 
-Añade cualquier otro según tu nicho (un MCP de pagos, de tu proveedor de mensajería, etc.).
+Agregar cualquier otro según el nicho (un MCP de pagos, del proveedor de mensajería, etc.).

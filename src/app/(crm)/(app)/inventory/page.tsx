@@ -6,7 +6,7 @@ export default function InventoryPage() {
   return (
     <ComingSoon
       title="Inventario"
-      description="Stock real de lo que vendés y de los insumos que comprás."
+      description="Stock real de lo que vende y de los insumos que compra."
       items={[
         "Existencias por producto e insumo",
         "Entradas, salidas y ajustes como movimientos",

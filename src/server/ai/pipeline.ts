@@ -268,11 +268,11 @@ export async function runAgentTurn(
       {
         role: "system",
         content:
-          "El cliente espera una respuesta y tu última acción no incluyó texto. " +
-          "Respondé OTRA VEZ el JSON incluyendo SIEMPRE un mensaje cordial para el cliente " +
+          "El cliente espera una respuesta y su última acción no incluyó texto. " +
+          "Responda OTRA VEZ el JSON incluyendo SIEMPRE un mensaje cordial para el cliente " +
           "(campo reply; si es handoff, farewell). Si el cliente se está despidiendo, " +
-          "agradeciendo o cerrando el tema, cerrá con un mensaje que diga que quedamos " +
-          "a la orden para cualquier otra duda. No cambies la decisión de fondo.",
+          "agradeciendo o cerrando el tema, cierre con un mensaje que diga que quedamos " +
+          "a la orden para cualquier otra duda. No cambie la decisión de fondo.",
       },
     ]);
     if (corrective.ok && actionHasReply(corrective.data)) {

@@ -6,7 +6,7 @@ export default function ProductionPage() {
   return (
     <ComingSoon
       title="Producción"
-      description="Qué fabricás, con qué insumos y a qué costo."
+      description="Qué fabrica, con qué insumos y a qué costo."
       items={[
         "Órdenes de producción con estado",
         "Consumo de insumos por receta",

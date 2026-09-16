@@ -104,7 +104,7 @@ export const PRODUCT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "Miga tierna y corte parejo. Disponible en masa brioche y en blanco XL de 22 rebanadas por unidad.",
   // No están en el catálogo todavía: si el negocio los carga, ya tienen copy.
   Baguette: "Crujiente por fuera y suave por dentro. Ideal para sándwiches.",
-  Bagel: "Un armado distinto para tus productos gourmet.",
+  Bagel: "Un armado distinto para sus productos gourmet.",
 };
 
 /** Descripción de una ficha; cae al fallback si el producto no tiene copy. */
@@ -129,7 +129,7 @@ export const NAV: readonly NavItem[] = [
 export const HERO = {
   eyebrow: "Horneado todos los días",
   // El H1 se parte en dos líneas para respetar la composición de la referencia.
-  titleLines: ["Pan recién horneado,", "para tu negocio"],
+  titleLines: ["Pan recién horneado,", "para su negocio"],
   subtitle:
     "Elaboramos pan artesanal para negocios de comida: hamburgueserías, sangucherías, cafeterías, restaurantes y cadenas. Cada masa está pensada para un uso concreto, con el mismo resultado todos los días.",
   primaryCta: { label: "Ver catálogo", href: "/catalogo" },
@@ -153,7 +153,7 @@ export const NOSOTROS = {
   body: [
     "LamasFoods elabora pan artesanal para abastecer a negocios gastronómicos: hamburgueserías, sangucherías, cafeterías, restaurantes, almacenes y cadenas de comida. Toda nuestra producción está pensada para ellos, desde el local de barrio hasta la operación con varias sucursales.",
     "Cada masa que horneamos responde a un uso concreto. La de papa da una miga húmeda que abraza los ingredientes y contiene los líquidos; la de brioche es alta, brillante y elástica, y devuelve la forma al armado. Esa diferencia es lo que hace que una hamburguesa se sostenga hasta el último bocado.",
-    "Trabajamos con fermentación larga, porque de ahí sale el sabor, y con despacho programado por zona para que la mercadería llegue antes de que abras.",
+    "Trabajamos con fermentación larga, porque de ahí sale el sabor, y con despacho programado por zona para que la mercadería llegue antes de que abra.",
   ],
 } as const;
 
@@ -172,21 +172,21 @@ export const VALUE_PROPS: readonly ValueProp[] = [
   {
     title: "Cada masa, para un uso distinto",
     description:
-      "La masa de papa da una miga húmeda que abraza los ingredientes y contiene los jugos. La de brioche es alta, brillante y elástica: vuelve a su forma y sostiene el armado. Eliges según lo que pida tu carta.",
+      "La masa de papa da una miga húmeda que abraza los ingredientes y contiene los jugos. La de brioche es alta, brillante y elástica: vuelve a su forma y sostiene el armado. La elección depende de lo que pida su carta.",
     image: "/site/prop-masas.jpg",
     cta: { label: "Ver masas", href: "/catalogo" },
   },
   {
     title: "Entrega programada",
     description:
-      "Despachamos en 11 comunas de Santiago con frecuencia coordinada, para que la mercadería llegue antes de que abras y no te quedes sin stock a mitad de servicio.",
+      "Despachamos en 11 comunas de Santiago con frecuencia coordinada, para que la mercadería llegue antes de que abra y no se quede sin stock a mitad de servicio.",
     image: "/site/prop-entrega.jpg",
     cta: { label: "Ver zonas", href: "/#contacto" },
   },
   {
-    title: "Volumen para tu negocio",
+    title: "Volumen para su negocio",
     description:
-      "Formatos y tamaños que se adaptan desde la cafetería de barrio hasta la cadena. La cotización se arma según el volumen y la frecuencia que necesites.",
+      "Formatos y tamaños que se adaptan desde la cafetería de barrio hasta la cadena. La cotización se arma según el volumen y la frecuencia que necesite.",
     image: "/site/prop-volumen.jpg",
     cta: { label: "Ver catálogo", href: "/catalogo" },
   },
@@ -194,7 +194,7 @@ export const VALUE_PROPS: readonly ValueProp[] = [
 
 export const VISIT = {
   title: "Visítanos",
-  body: "Puedes conocer la planta, probar las masas y armar el pedido con nosotros. Si lo prefieres, coordinamos la primera entrega en tu local.",
+  body: "Puede conocer la planta, probar las masas y armar el pedido con nosotros. Si lo prefiere, coordinamos la primera entrega en su local.",
   cta: { label: "Coordinar una visita", href: WHATSAPP_HREF },
   images: [
     { src: "/site/visita-1.jpg", alt: "Pan recién horneado saliendo del horno" },
@@ -216,7 +216,7 @@ export const GALLERY_NOTES = [
   },
   {
     title: "Calidad constante",
-    body: "Medimos y repetimos. Si el pan de ayer funcionó en tu vitrina, el de mañana funcionará igual.",
+    body: "Medimos y repetimos. Si el pan de ayer funcionó en su vitrina, el de mañana funcionará igual.",
   },
 ] as const;
 
@@ -224,8 +224,8 @@ export const CATALOG_COPY = {
   eyebrow: "Catálogo",
   title: "Nuestros productos",
   intro:
-    "Cada producto se lista con sus masas y sus formatos. La cotización la hacemos por WhatsApp, según el volumen y la frecuencia que necesites.",
-  empty: "Estamos actualizando el catálogo. Escríbenos y te pasamos la lista del día.",
+    "Cada producto se lista con sus masas y sus formatos. La cotización la hacemos por WhatsApp, según el volumen y la frecuencia que necesite.",
+  empty: "Estamos actualizando el catálogo. Escríbanos y le pasamos la lista del día.",
   emptyCta: { label: "Consultar disponibilidad", href: WHATSAPP_HREF },
 } as const;
 

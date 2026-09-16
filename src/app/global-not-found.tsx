@@ -74,7 +74,7 @@ function PublicNotFound() {
           No encontramos esta página
         </h1>
         <p className="mt-5 text-base leading-relaxed text-site-muted">
-          Puede que el enlace esté viejo o que la página se haya movido. Probá
+          Puede que el enlace esté viejo o que la página se haya movido. Pruebe
           desde el catálogo.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
@@ -111,7 +111,7 @@ function CrmNotFound() {
         Esta página no existe
       </h1>
       <p className="mt-3 text-sm leading-relaxed text-text-2">
-        Revisá la dirección o volvé a la bandeja para seguir trabajando.
+        Revise la dirección o vuelva a la bandeja para seguir trabajando.
       </p>
       <Link
         href="/inbox"

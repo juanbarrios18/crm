@@ -128,7 +128,7 @@ export function PushToggle() {
   if (status === "unsupported") {
     return (
       <p className="text-sm text-text-3">
-        Tu navegador no soporta notificaciones push. Usá Chrome/Edge (Android) o
+        Su navegador no soporta notificaciones push. Use Chrome/Edge (Android) o
         Safari en una PWA instalada (iOS 16.4+).
       </p>
     );
@@ -136,8 +136,8 @@ export function PushToggle() {
   if (status === "denied") {
     return (
       <p className="text-sm text-text-3">
-        Notificaciones bloqueadas. Habilitalas en la configuración del navegador y
-        recargá.
+        Notificaciones bloqueadas. Habilítelas en la configuración del navegador y
+        recargue.
       </p>
     );
   }

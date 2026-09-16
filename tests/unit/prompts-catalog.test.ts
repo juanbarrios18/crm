@@ -120,7 +120,7 @@ describe("buildAgentSystemPrompt", () => {
 
   it("prohíbe afirmar acciones que el canal no puede realizar", () => {
     const prompt = build();
-    expect(prompt).toContain("NUNCA afirmes");
+    expect(prompt).toContain("NUNCA afirme");
     expect(prompt).toContain("NO envía correos");
     expect(prompt).toContain("no recibió algo");
   });

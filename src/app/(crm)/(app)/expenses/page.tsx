@@ -6,7 +6,7 @@ export default function ExpensesPage() {
   return (
     <ComingSoon
       title="Gastos"
-      description="Los gastos operativos del negocio, separados del costo de lo que producís."
+      description="Los gastos operativos del negocio, separados del costo de lo que produce."
       items={[
         "Gastos por categoría, fecha y responsable",
         "Comprobante y forma de pago",
