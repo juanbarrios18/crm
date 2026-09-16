@@ -3,6 +3,7 @@ import { apiError, withAuth } from "@/lib/api";
 import { getDb, schema } from "@/lib/db";
 import { scoped } from "@/lib/db/tenant";
 import { PERSONA_LABELS } from "@/server/lab/personas";
+import { computeDispersion } from "@/server/lab/judge";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,15 @@ export const GET = withAuth(async (session, _req: Request, ctx: Params) => {
     .select()
     .from(schema.agentTestCase)
     .where(eq(schema.agentTestCase.runId, id))
-    .orderBy(asc(schema.agentTestCase.createdAt));
+    .orderBy(
+      asc(schema.agentTestCase.repeatIndex),
+      asc(schema.agentTestCase.persona)
+    );
+
+  // Dispersión por persona: con N repeticiones por persona, una corrida con
+  // personas inestables no permite atribuir cambios (el ruido es del orden de
+  // la señal). Se calcula sobre los mismos casos que devuelve el detalle.
+  const dispersion = computeDispersion(cases);
 
   return Response.json({
     run: {
@@ -42,10 +51,12 @@ export const GET = withAuth(async (session, _req: Request, ctx: Params) => {
       startedAt: run.startedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
     },
+    dispersion,
     cases: cases.map((c) => ({
       id: c.id,
       persona: c.persona,
       personaLabel: PERSONA_LABELS[c.persona] ?? c.persona,
+      repeatIndex: c.repeatIndex,
       status: c.status,
       veredicto: c.veredicto,
       hallazgos: c.hallazgos ?? [],

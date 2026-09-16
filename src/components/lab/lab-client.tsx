@@ -42,7 +42,9 @@ type Hallazgo = {
     | "debio_escalar"
     | "tono"
     | "afirmacion_sin_evidencia"
-    | "pipeline";
+    | "pipeline"
+    | "dialecto"
+    | "judge_failed";
   evidencia: string;
   sugerencia?: { pregunta: string; respuesta: string };
 };
@@ -51,6 +53,7 @@ type Case = {
   id: string;
   persona: string;
   personaLabel: string;
+  repeatIndex: number;
   status: string;
   veredicto: "verde" | "amarillo" | "rojo" | null;
   hallazgos: Hallazgo[];
@@ -63,6 +66,24 @@ type Case = {
   finalStage: string | null;
   expectAdvance: boolean | null;
   advanced: boolean | null;
+};
+
+type DispersionPersona = {
+  persona: string;
+  veredictos: string[];
+  inestable: boolean;
+  juzgadas: number;
+};
+
+type Dispersion = {
+  personas: DispersionPersona[];
+  inestables: number;
+};
+
+type RunDetail = {
+  run: Run;
+  cases: Case[];
+  dispersion: Dispersion | null;
 };
 
 type TurnMetric = {
@@ -87,13 +108,15 @@ const TIPO_LABELS: Record<Hallazgo["tipo"], string> = {
   tono: "Tono",
   afirmacion_sin_evidencia: "Afirmación sin evidencia",
   pipeline: "Pipeline (no avanzó)",
+  dialecto: "Dialecto",
+  judge_failed: "Juez sin veredicto",
 };
 
 export function LabClient() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [aiConfigured, setAiConfigured] = useState(true);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ run: Run; cases: Case[] } | null>(null);
+  const [detail, setDetail] = useState<RunDetail | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +136,7 @@ export function LabClient() {
   const refetchDetail = useCallback(async (runId: string) => {
     const res = await fetch(`/api/lab/runs/${runId}`).catch(() => null);
     if (!res?.ok) return;
-    setDetail((await res.json()) as { run: Run; cases: Case[] });
+    setDetail((await res.json()) as RunDetail);
   }, []);
 
   useEffect(() => {
@@ -368,14 +391,55 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Agrupa los casos por persona, conservando el orden de aparición. */
+function groupCases(cases: Case[]): [string, Case[]][] {
+  const map = new Map<string, Case[]>();
+  for (const c of cases) {
+    const group = map.get(c.persona) ?? [];
+    group.push(c);
+    map.set(c.persona, group);
+  }
+  return [...map.entries()];
+}
+
+function VeredictoChip({
+  veredicto,
+  repeatIndex,
+}: {
+  veredicto: Case["veredicto"];
+  repeatIndex: number;
+}) {
+  const variant =
+    veredicto === "verde"
+      ? "success"
+      : veredicto === "amarillo"
+        ? "warning"
+        : veredicto === "rojo"
+          ? "destructive"
+          : "secondary";
+  const label =
+    veredicto === "verde"
+      ? "Verde"
+      : veredicto === "amarillo"
+        ? "Amarillo"
+        : veredicto === "rojo"
+          ? "Rojo"
+          : "Sin veredicto";
+  return (
+    <Badge variant={variant}>
+      #{repeatIndex + 1} · {label}
+    </Badge>
+  );
+}
+
 function Report({
   detail,
   onApplied,
 }: {
-  detail: { run: Run; cases: Case[] };
+  detail: RunDetail;
   onApplied: () => void;
 }) {
-  const { run, cases } = detail;
+  const { run, cases, dispersion } = detail;
   const measured = cases.filter((c) => (c.turnCount ?? 0) > 0);
   const totalTurns = measured.reduce((acc, c) => acc + (c.turnCount ?? 0), 0);
   const totalLatency = measured.reduce((acc, c) => acc + (c.latencyMs ?? 0), 0);
@@ -385,10 +449,32 @@ function Report({
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle>Reporte</CardTitle>
-            <ScoreBadge run={run} />
+            <div className="flex items-center gap-2">
+              {dispersion && (
+                <span
+                  className={`text-xs font-medium ${
+                    dispersion.inestables > 0
+                      ? "text-[#8a6d3b]"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {dispersion.inestables === 0
+                    ? "0 personas inestables"
+                    : `${dispersion.inestables} persona(s) inestable(s)`}
+                </span>
+              )}
+              <ScoreBadge run={run} />
+            </div>
           </div>
+          {dispersion && run.status === "done" && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {dispersion.inestables > 0
+                ? "Con personas inestables, esta corrida no permite atribuir cambios: la variación entre repeticiones es del mismo orden que el efecto que se quiere medir."
+                : "Ninguna persona cambió de veredicto entre repeticiones: la corrida es estable y sus diferencias de score son atribuibles."}
+            </p>
+          )}
           {run.status === "failed" && (
             <p className="text-sm text-destructive">
               La corrida falló: {run.error ?? "error desconocido"}. Vuelve a
@@ -417,21 +503,60 @@ function Report({
             {cases.some((c) => c.status === "judge_failed") && (
               <p className="mt-3 text-xs text-[#8a6d3b]">
                 {cases.filter((c) => c.status === "judge_failed").length} caso(s) sin
-                veredicto (el juez no respondió válido); excluidos del score.
+                veredicto (el juez no respondió válido); excluidos de la mediana de su
+                persona.
               </p>
             )}
           </CardContent>
         )}
       </Card>
 
-      {cases.map((c) => (
-        <CaseCard key={c.id} testCase={c} onApplied={onApplied} />
-      ))}
+      {groupCases(cases).map(([persona, group]) => {
+        const ordenados = [...group].sort(
+          (a, b) => a.repeatIndex - b.repeatIndex
+        );
+        const info = dispersion?.personas.find((p) => p.persona === persona);
+        return (
+          <div key={persona} className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 px-1">
+              <span className="text-sm font-semibold">
+                {ordenados[0]?.personaLabel ?? persona}
+              </span>
+              {ordenados.map((c) => (
+                <VeredictoChip
+                  key={c.id}
+                  veredicto={c.veredicto}
+                  repeatIndex={c.repeatIndex}
+                />
+              ))}
+              {info?.inestable && (
+                <Badge variant="destructive">Inestable</Badge>
+              )}
+            </div>
+            {ordenados.map((c) => (
+              <CaseCard
+                key={c.id}
+                testCase={c}
+                repetitionLabel={`Repetición #${c.repeatIndex + 1}`}
+                onApplied={onApplied}
+              />
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function CaseCard({ testCase, onApplied }: { testCase: Case; onApplied: () => void }) {
+function CaseCard({
+  testCase,
+  onApplied,
+  repetitionLabel,
+}: {
+  testCase: Case;
+  onApplied: () => void;
+  repetitionLabel?: string;
+}) {
   const [open, setOpen] = useState(false);
   const c = testCase;
   const avgTurn =
@@ -458,7 +583,7 @@ function CaseCard({ testCase, onApplied }: { testCase: Case; onApplied: () => vo
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             {icon}
-            {c.personaLabel}
+            {repetitionLabel ?? c.personaLabel}
             {c.status === "judge_failed" && (
               <Badge variant="secondary">sin veredicto</Badge>
             )}

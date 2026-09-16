@@ -450,6 +450,13 @@ export const agentTestCase = pgTable(
       .notNull()
       .references(() => agentTestRun.id, { onDelete: "cascade" }),
     persona: text("persona").notNull(),
+    /**
+     * Repetición de la persona dentro de la corrida (0..N-1). Cada persona se
+     * evalúa N veces para poder medir la dispersión del instrumento; el índice
+     * identifica cada repetición. Su valor por defecto (0) conserva válidas las
+     * corridas anteriores, que tenían un solo caso por persona.
+     */
+    repeatIndex: integer("repeat_index").notNull().default(0),
     conversationId: text("conversation_id").references(() => conversation.id, {
       onDelete: "set null",
     }),
