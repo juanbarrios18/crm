@@ -128,3 +128,30 @@
   outline-offset: 2px;
 }
 
+/*
+  Apertura del menú de móvil (007).
+
+  Va con `animation` y NO con `transition`: mientras el `<details>` está cerrado
+  el panel está en `display: none`, y una transición no arranca desde un elemento
+  que no se está renderizando. La animación sí corre al pasar a visible.
+
+  El CIERRE no se anima, por la misma razón al revés: al quitar el `open` el panel
+  desaparece de golpe. Animarlo pide `::details-content` con
+  `transition-behavior: allow-discrete` (Chrome 131+), que todavía no es base.
+  El bloque de `prefers-reduced-motion` de arriba neutraliza esto solo.
+*/
+@keyframes site-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.site details[open] > .site-menu {
+  animation: site-menu-in 180ms ease-out;
+}
+

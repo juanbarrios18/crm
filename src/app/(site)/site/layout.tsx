@@ -96,8 +96,22 @@ const BUSINESS_JSON_LD = {
 export default function SiteLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  /*
+   * `scroll-pt-*`: el header es sticky, así que al saltar a un ancla
+   * (`/#contacto`) el destino quedaba TAPADO por el header. `scroll-padding-top`
+   * corre la posición de scroll de TODOS los saltos de ancla, y va en el
+   * elemento que scrollea (`<html>`), no en cada ancla — así no hay que
+   * acordarse de tocar cada `id` que se agregue.
+   *
+   * Los valores salen de medir el header: 73px en móvil y 112px desde `sm`
+   * (barra de utilidad 32 + barra principal 80). Si el header cambia de alto,
+   * estos dos números se actualizan.
+   */
   return (
-    <html lang="es" className={`${geist.variable} ${display.variable}`}>
+    <html
+      lang="es"
+      className={`${geist.variable} ${display.variable} scroll-pt-20 sm:scroll-pt-32`}
+    >
       <body className="site font-sans antialiased">
         <JsonLd data={BUSINESS_JSON_LD} />
         <SiteHeader />
