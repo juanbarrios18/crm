@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { PublicProduct } from "@/lib/catalog";
 import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 import {
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
+  renderCatalogVocabulary,
   renderCatalog,
   renderDeliveryZones,
 } from "@/server/ai/prompts";
@@ -44,6 +46,41 @@ const CATALOG = [
 ];
 
 const ZONES = [{ comuna: "Macul", costoDespacho: 4500 }];
+
+/**
+ * Catálogo representativo con el tamaño REAL del de Lamas Foods (12 filas, 4
+ * productos): el vocabulario que reemplaza a las instrucciones tiene que medirse
+ * contra algo realista, no contra un producto de juguete.
+ */
+function fila(producto: string, masa: string, formato: string): PublicProduct {
+  return {
+    producto,
+    masa,
+    formato,
+    unidadesPorBolsa: 6,
+    precioUnitarioNeto: 0,
+    precioBolsaNeto: 0,
+    precioBolsaConIva: 0,
+    imagen: null,
+    activo: true,
+    notas: null,
+  };
+}
+
+const CATALOGO_REAL: PublicProduct[] = [
+  fila("Pan ciabatta", "Regular", "Estandar"),
+  fila("Pan de completo", "Papa", "15 cm"),
+  fila("Pan de completo", "Papa", "20 cm"),
+  fila("Pan de completo", "Papa", "30 cm"),
+  fila("Pan de hamburguesa", "Brioche", "10 cm"),
+  fila("Pan de hamburguesa", "Brioche", "11 cm"),
+  fila("Pan de hamburguesa", "Brioche", "12 cm"),
+  fila("Pan de hamburguesa", "Papa", "10 cm"),
+  fila("Pan de hamburguesa", "Papa", "11 cm"),
+  fila("Pan de hamburguesa", "Papa", "12 cm"),
+  fila("Pan de molde", "Blanco XL", "22 rebanadas 14x14 cm"),
+  fila("Pan de molde", "Brioche", "Unidad"),
+];
 
 /**
  * Momento fijo: el prompt incluye una línea con la fecha y hora del turno, así
@@ -236,17 +273,87 @@ describe("buildAnnotationSystemPrompt", () => {
     expect(prompt.toLowerCase()).toContain("extraiga");
   });
 
-  it("no incluye catálogo, zonas ni voz de marca (recorte deliberado)", () => {
+  it("no incluye zonas ni voz de marca (recorte deliberado)", () => {
     const prompt = buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
       currentStage: null,
     });
-    expect(prompt).not.toContain("CATÁLOGO DE PRODUCTOS");
-    expect(prompt).not.toContain("Pan de hamburguesa");
+    // La sección de zonas trae cobertura y tarifa: nada de eso entra. Se afirma
+    // sobre su contenido real (el formato de `renderDeliveryZones`, con tarifa),
+    // no sobre un nombre de comuna suelto — el contrato sí puede citar una comuna
+    // como EJEMPLO de forma.
     expect(prompt).not.toContain("ZONAS DE ENVÍO");
-    expect(prompt).not.toContain("Macul");
+    expect(prompt).not.toContain("de despacho");
+    expect(prompt).not.toContain("sin tarifa definida");
     expect(prompt).not.toContain("Tono:");
     expect(prompt).not.toContain("Saludo sugerido");
+    expect(prompt).not.toContain("Reglas de escalado");
+  });
+
+  it("prohíbe los marcadores de posición (hallazgo de la medición de F9)", () => {
+    const prompt = buildAnnotationSystemPrompt({
+      profile: PROFILE,
+      stages: STAGES,
+      currentStage: null,
+      catalog: CATALOGO_REAL,
+    });
+    // El esqueleto usa "..." como valor y el modelo puede copiarlo como si
+    // fuera un dato. Se conserva el esqueleto (guía la COBERTURA de campos) con
+    // una regla explícita que lo prohíbe, y el pipeline además los descarta al
+    // escribir con `isPlaceholderValue`.
+    expect(prompt).toContain("NUNCA escriba los marcadores del ejemplo");
+    expect(prompt).toContain('"stage":"<etapa>"');
+  });
+
+  it("incluye el vocabulario de productos SIN precios (P2)", () => {
+    const prompt = buildAnnotationSystemPrompt({
+      profile: PROFILE,
+      stages: STAGES,
+      currentStage: null,
+      catalog: CATALOG,
+    });
+    // El vocabulario que hace falta para reconocer producto y formato…
+    expect(prompt).toContain("Pan de hamburguesa");
+    expect(prompt).toContain("Brioche");
+    expect(prompt).toContain("12 cm");
+    // …y NADA de precios: la anotación no cotiza.
+    expect(prompt).not.toContain("2.220");
+    expect(prompt).not.toContain("2641");
+    expect(prompt).not.toContain("IVA");
+    expect(prompt).not.toContain("CATÁLOGO DE PRODUCTOS");
+  });
+
+  it("sin catálogo el prompt no cambia respecto de no tener productos", () => {
+    const sinCatalogo = buildAnnotationSystemPrompt({
+      profile: PROFILE,
+      stages: STAGES,
+      currentStage: null,
+    });
+    expect(buildAnnotationSystemPrompt({
+      profile: PROFILE,
+      stages: STAGES,
+      currentStage: null,
+      catalog: [],
+    })).toBe(sinCatalogo);
+    expect(sinCatalogo).not.toContain("PRODUCTOS DEL CATÁLOGO");
+  });
+
+});
+
+describe("renderCatalogVocabulary (P2)", () => {
+  it("agrupa masas y formatos por producto, sin precios", () => {
+    const text = renderCatalogVocabulary([
+      { ...CATALOG[0]!, masa: "Brioche", formato: "11 cm" },
+      { ...CATALOG[0]!, masa: "Brioche", formato: "12 cm" },
+      { ...CATALOG[0]!, masa: "Papa", formato: "12 cm" },
+    ]);
+    expect(text).toContain("Pan de hamburguesa: masas Brioche, Papa; formatos 11 cm, 12 cm");
+    expect(text).not.toContain("$");
+    expect(text).not.toContain("neto");
+  });
+
+  it("catálogo vacío → cadena vacía (el prompt no cambia)", () => {
+    expect(renderCatalogVocabulary([])).toBe("");
   });
 });

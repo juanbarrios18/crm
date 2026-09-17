@@ -114,6 +114,21 @@ export function renderKb(entries: KbEntry[]): string {
 export const ANNOTATION_MARKER = "[ANOTACION]";
 
 /**
+ * Cuántos mensajes del historial recibe la ANOTACIÓN (P2).
+ *
+ * La conversación sigue viendo hasta 20: para responder hace falta el hilo
+ * completo. La extracción no — el dato aparece cuando el cliente lo dice, y
+ * arrastrar todo el historial encarece cada turno sin aportar. Se conservan los
+ * ÚLTIMOS mensajes, que son donde vive el dato recién dicho.
+ *
+ * MEDIDO (F9, sobre 129 turnos reales × 3 repeticiones): comparado contra el
+ * historial completo, este tope **no produce pérdida medible** en ningún campo.
+ * Los topes 6, 8 y 12 son indistinguibles entre sí, así que se elige el más
+ * barato. Ver `docs/bitacora-mejoras-llm.md`, fase F9.
+ */
+export const ANNOTATION_HISTORY_LIMIT = 6;
+
+/**
  * Ficha comercial del cliente ya capturada por el agente.
  *
  * Refleja las columnas de la tabla `contact` (`src/lib/db/schema.ts`): los
@@ -275,8 +290,9 @@ const CONTRATO_TECNICO: readonly string[] = [
  */
 const CONTRATO_ANOTACION: readonly string[] = [
   "Extraiga de la conversación SOLO los datos del lead que estén explícitos. Responda ÚNICAMENTE un objeto JSON:",
-  '- {"stage":"<etapa>","note":"...","empresa":"...","comuna":"...","rut":"...","razonSocial":"...","giro":"...","direccionFacturacion":"...","email":"...","frecuenciaDespacho":"...","volumenSemanal":"...","productoInteres":"...","formato":"..."}',
+  '- {"stage":"<etapa>","note":"...","empresa":"...","rubro":"...","comuna":"...","rut":"...","razonSocial":"...","giro":"...","direccionFacturacion":"...","email":"...","frecuenciaDespacho":"...","volumenSemanal":"...","productoInteres":"...","formato":"..."}',
   "Incluya solo los campos de los que tenga dato; lo ausente se omite. Si no hay nada que anotar, responda {}.",
+  'NUNCA escriba los marcadores del ejemplo ("...", "<etapa>", "N/A") como valor: son la FORMA del JSON, no datos.',
   'El campo "stage" usa el nombre EXACTO de una etapa de la lista de arriba. Escriba SOLO el nombre, sin la anotación entre paréntesis (ej.: "Cliente", nunca "Cliente (ganado)").',
   "Reglas de la etapa (importante):",
   "- El lead arranca en la primera etapa. Avance de etapa cuando el cliente avance en el proceso de compra.",
@@ -434,17 +450,31 @@ export function buildAgentSystemPrompt(input: {
 /**
  * System prompt de la llamada de ANOTACIÓN (segunda llamada del turno).
  *
- * RECORTE DELIBERADO: es extracción, no conversación. No incluye el catálogo, ni
- * las zonas de envío, ni la voz de marca (tono, saludo, reglas de escalado): para
- * reconocer datos del lead alcanza con las etapas, la etapa actual, las
- * instrucciones del negocio que los describen y el bloque `CONTRATO_ANOTACION`.
- * Por eso este prompt es notoriamente más chico que el de conversación, y no debe
- * "igualarse" agregándole contexto de conversación.
+ * QUÉ SE RECORTA Y QUÉ NO (P2, ajustado por medición):
+ *
+ * - NO se recorta el contexto del NEGOCIO. El plan proponía sacar las
+ *   instrucciones (≈3.000 caracteres) por considerarlas un prompt de
+ *   conversador. La medición sobre transcripts reales lo refutó: sin ellas el
+ *   agente deja de avanzar de etapa, y **17 de 39 conversaciones terminan en una
+ *   etapa distinta** (casi siempre más atrás). Las instrucciones también
+ *   describen el PROCESO COMERCIAL, y la etapa se juzga contra ese proceso. La
+ *   evidencia y los números están en `docs/bitacora-mejoras-llm.md`, fase F9.
+ *
+ * - SÍ se recorta el HISTORIAL (`ANNOTATION_HISTORY_LIMIT`): la extracción no
+ *   necesita el hilo completo, y es donde está el ahorro real.
+ *
+ * - SÍ se agrega el VOCABULARIO de productos (`renderCatalogVocabulary`), que
+ *   antes no estaba: medido, mejora la extracción de `productoInteres` y
+ *   `formato` de forma consistente (del orden de +12 a +19 pp).
+ *
+ * No incluye las zonas de envío ni la voz de marca (tono, saludo, reglas de
+ * escalado): eso sí es contexto de conversador.
  */
 export function buildAnnotationSystemPrompt(input: {
   profile: AgentProfile;
   stages: { name: string; kind?: string }[];
   currentStage?: string | null;
+  catalog?: PublicProduct[];
 }): string {
   const stageList = input.stages
     .map((s, i) => {
@@ -456,14 +486,51 @@ export function buildAnnotationSystemPrompt(input: {
   return [
     `${ANNOTATION_MARKER} Extraiga datos comerciales del lead de esta conversación. No redacte la respuesta al cliente.`,
     input.profile.instructions
-      ? `Instrucciones del negocio (referencia para reconocer los datos):\n${input.profile.instructions}`
+      ? `Instrucciones del negocio (referencia para reconocer los datos y juzgar el avance):\n${input.profile.instructions}`
       : null,
     `Etapas del pipeline (en orden): ${stageList}`,
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
+    input.catalog && input.catalog.length > 0
+      ? renderCatalogVocabulary(input.catalog)
+      : null,
     CONTRATO_ANOTACION.join("\n"),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * Vocabulario compacto del catálogo para la ANOTACIÓN (P2): nombres de producto
+ * con sus masas y formatos, agrupados por producto.
+ *
+ * SIN PRECIOS a propósito. La anotación extrae `productoInteres` y `formato`, no
+ * cotiza: incluir precios sería peso muerto y abriría la puerta a que la
+ * extracción opine sobre ellos. Se omite el catálogo vacío para que el prompt no
+ * cambie respecto de no tener productos.
+ */
+export function renderCatalogVocabulary(products: PublicProduct[]): string {
+  if (products.length === 0) return "";
+  const porProducto = new Map<string, { masas: Set<string>; formatos: Set<string> }>();
+  for (const p of products) {
+    const entry = porProducto.get(p.producto) ?? {
+      masas: new Set<string>(),
+      formatos: new Set<string>(),
+    };
+    if (p.masa) entry.masas.add(p.masa);
+    if (p.formato) entry.formatos.add(p.formato);
+    porProducto.set(p.producto, entry);
+  }
+  const lineas = [...porProducto.entries()].map(([producto, v]) => {
+    const partes = [
+      v.masas.size > 0 ? `masas ${[...v.masas].join(", ")}` : null,
+      v.formatos.size > 0 ? `formatos ${[...v.formatos].join(", ")}` : null,
+    ].filter(Boolean);
+    return `- ${producto}: ${partes.join("; ")}`;
+  });
+  return [
+    "PRODUCTOS DEL CATÁLOGO (vocabulario para reconocer el producto y el formato; SIN precios):",
+    ...lineas,
+  ].join("\n");
 }
 
 /** Prompt del juez del Laboratorio: UNA llamada por conversación (FR-032). */

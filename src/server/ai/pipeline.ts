@@ -8,6 +8,7 @@ import { isWindowOpen } from "@/server/inbox/window";
 import { SendError, sendText } from "@/server/inbox/send";
 import {
   ConversationReply,
+  isPlaceholderValue,
   LeadExtraction,
   resolveStage,
   type LeadExtractionType,
@@ -15,6 +16,7 @@ import {
 import { matchesHandoffIntent } from "@/server/ai/handoff";
 import { toConversationHistory } from "@/server/ai/history";
 import {
+  ANNOTATION_HISTORY_LIMIT,
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
   CLOSING_FAREWELL,
@@ -299,6 +301,10 @@ export async function runAgentTurn(
   // puede tumbar la conversación: si falla, se registra un aviso y el turno
   // entrega igual la respuesta.
   //
+  // Historial ACOTADO (P2): la extracción no necesita el hilo completo. Se
+  // conservan los últimos `ANNOTATION_HISTORY_LIMIT` mensajes, que es donde vive
+  // el dato recién dicho.
+  //
   // El historial va en modo `plain-assistant`: la marca de saliente humano la
   // explica N2, que vive solo en el prompt de conversación. Acá es extracción
   // pura y el marcador sería ruido sin explicación.
@@ -309,9 +315,12 @@ export async function runAgentTurn(
         profile,
         stages,
         currentStage: currentStage?.name ?? null,
+        catalog,
       }),
     },
-    ...toConversationHistory(history, { humanOutbound: "plain-assistant" }),
+    ...toConversationHistory(history, { humanOutbound: "plain-assistant" }).slice(
+      -ANNOTATION_HISTORY_LIMIT
+    ),
   ];
 
   // ── Llamadas 1 y 2 EN PARALELO (P1) ───────────────────────────────────────
@@ -325,12 +334,15 @@ export async function runAgentTurn(
   // anotación termina antes que la entrega, esperarla más tarde no debe inflar
   // su latencia con el tiempo de esa espera.
   let annotationDoneAt = 0;
-  const annotationPromise = chatJson(LeadExtraction, annotationMessages).then(
-    (result) => {
-      annotationDoneAt = Date.now();
-      return result;
-    }
-  );
+  // P2: la anotación puede usar su propio modelo (`OPENROUTER_ANNOTATION_MODEL`).
+  // Sin la variable, `chatJson` cae a OPENROUTER_MODEL como antes.
+  const annotationModel = getEnv().OPENROUTER_ANNOTATION_MODEL;
+  const annotationPromise = chatJson(LeadExtraction, annotationMessages, {
+    model: annotationModel,
+  }).then((result) => {
+    annotationDoneAt = Date.now();
+    return result;
+  });
 
   const conversationResult = await conversationPromise;
   let conversationDoneAt = Date.now();
@@ -567,10 +579,13 @@ async function appendLeadNote(
     "productoInteres",
     "formato",
   ] as const;
+  // Un marcador de posición ("...") no es un dato: se descarta en vez de
+  // escribirlo en el contacto (ver `isPlaceholderValue`).
   const hasStructuredField = fieldKeys.some(
-    (key) => fields[key] !== undefined
+    (key) => fields[key] !== undefined && !isPlaceholderValue(fields[key])
   );
-  if (fields.note === undefined && !hasStructuredField) return;
+  const note = isPlaceholderValue(fields.note) ? undefined : fields.note;
+  if (note === undefined && !hasStructuredField) return;
 
   const db = getDb();
 
@@ -598,18 +613,20 @@ async function appendLeadNote(
   if (!contact) return;
 
   // Último valor gana: cada campo estructurado presente en la extracción
-  // sobrescribe el valor previo; lo ausente se conserva.
+  // sobrescribe el valor previo; lo ausente se conserva. Los marcadores de
+  // posición se descartan igual que lo ausente.
   const patch: Partial<typeof schema.contact.$inferInsert> = {};
   for (const key of fieldKeys) {
-    if (fields[key] !== undefined) {
-      patch[key] = fields[key];
+    const value = fields[key];
+    if (value !== undefined && !isPlaceholderValue(value)) {
+      patch[key] = value;
     }
   }
 
-  const notes = fields.note
+  const notes = note
     ? contact.notes
-      ? `${contact.notes}\n[IA] ${fields.note}`
-      : `[IA] ${fields.note}`
+      ? `${contact.notes}\n[IA] ${note}`
+      : `[IA] ${note}`
     : contact.notes;
 
   await db

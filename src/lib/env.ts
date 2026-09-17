@@ -33,6 +33,10 @@ const envSchema = z.object({
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api"),
   OPENROUTER_MODEL: z.string().optional(),
   OPENROUTER_JUDGE_MODEL: z.string().optional(),
+  // Modelo de la llamada de ANOTACIÓN (P2). La anotación es extracción, no
+  // conversación: un modelo más barato suele alcanzar y baja el costo por turno.
+  // Vacío/ausente → usa OPENROUTER_MODEL, como antes.
+  OPENROUTER_ANNOTATION_MODEL: z.string().optional(),
   // Nivel de razonamiento del modelo ("low" | "medium" | "high"), si el modelo
   // lo soporta (p. ej. nvidia/nemotron-3-ultra acepta medium/high). Vacío/ausente
   // → usa el default del proveedor. Se manda en el body como `reasoning`/`reasoning_effort`.

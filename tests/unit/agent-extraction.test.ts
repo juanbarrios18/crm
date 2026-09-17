@@ -21,8 +21,12 @@ vi.mock("@/lib/meta/client", async (importOriginal) => {
 const aiResults: unknown[] = [];
 let aiCall = 0;
 
+/** Argumentos de cada llamada al proveedor, para inspeccionar lo que se envía. */
+const aiCalls: unknown[][] = [];
+
 vi.mock("@/lib/ai", () => ({
-  chatJson: vi.fn(() => {
+  chatJson: vi.fn((...args: unknown[]) => {
+    aiCalls.push(args);
     const result = aiResults[Math.min(aiCall, aiResults.length - 1)];
     aiCall++;
     return Promise.resolve(result);
@@ -140,7 +144,10 @@ function failExtraction() {
   return { ok: false, error: "provider_error", detail: "proveedor caído" };
 }
 
-function queue(opts: { lead?: unknown[]; stages?: unknown[] } = {}) {
+function queue(
+  opts: { lead?: unknown[]; stages?: unknown[]; contact?: unknown[] } = {}
+) {
+  const contact = opts.contact ?? [{ id: "ct_1", notes: null }];
   selectQueue.push(
     [CONV],
     [PROFILE],
@@ -148,8 +155,10 @@ function queue(opts: { lead?: unknown[]; stages?: unknown[] } = {}) {
     [], // kb
     opts.stages ?? STAGES,
     opts.lead ?? [], // lead actual
+    contact, // ficha del cliente (prompt de conversación)
     [], // catálogo
-    [] // zonas
+    [], // zonas
+    contact // contacto que lee `appendLeadNote` al escribir
   );
 }
 
@@ -185,6 +194,7 @@ describe("pipeline: llamada de anotación separada de la conversación", () => {
     updates.length = 0;
     aiResults.length = 0;
     aiCall = 0;
+    aiCalls.length = 0;
     stubAgentTurnEnv();
   });
 
@@ -247,5 +257,108 @@ describe("pipeline: llamada de anotación separada de la conversación", () => {
     await runAgentTurn("cv_test");
 
     expect(stageMove()).toBeUndefined();
+  });
+
+  it("descarta marcadores de posición en vez de escribirlos en el contacto", async () => {
+    // Hallazgo de la medición de F9: al adelgazar el prompt de anotación, el
+    // modelo copiaba los "..." del ejemplo del contrato como si fueran datos.
+    // Zod los acepta (cumplen min(1)); el guard los descarta al escribir.
+    aiResults.push(
+      okReply("hola"),
+      okExtraction({ comuna: "...", productoInteres: "Pan de hamburguesa", email: "N/A" })
+    );
+    queue();
+
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    await runAgentTurn("cv_test");
+
+    const write = contactWrite()!.values as Record<string, unknown>;
+    // El dato real se escribe; los marcadores no.
+    expect(write.productoInteres).toBe("Pan de hamburguesa");
+    expect(write.comuna).toBeUndefined();
+    expect(write.email).toBeUndefined();
+  });
+
+  it("una extracción donde TODO es marcador no escribe nada", async () => {
+    aiResults.push(okReply("hola"), okExtraction({ comuna: "...", email: "N/A" }));
+    queue();
+
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    await runAgentTurn("cv_test");
+
+    expect(contactWrite()).toBeUndefined();
+  });
+
+  it("la nota tampoco acepta un marcador de posición", async () => {
+    aiResults.push(okReply("hola"), okExtraction({ note: "..." }));
+    queue();
+
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    await runAgentTurn("cv_test");
+
+    expect(contactWrite()).toBeUndefined();
+  });
+
+  it("la anotación recibe SOLO los últimos 6 mensajes (P2)", async () => {
+    // La conversación sigue viendo el hilo completo; la extracción no lo necesita
+    // y es donde está el ahorro real de P2.
+    aiResults.push(okReply("hola"), okExtraction({}));
+    // La consulta real del pipeline ordena por `createdAt` DESC y después hace
+    // `reverse()` para dejar el historial cronológico: el fixture tiene que
+    // llegar en el mismo orden que la base (más nuevo primero).
+    const largo = Array.from({ length: 12 }, (_, i) => i)
+      .reverse()
+      .map((i) => ({
+        id: `msg_${i}`,
+        direction: i % 2 === 0 ? "in" : "out",
+        text: `mensaje ${i}`,
+        aiGenerated: true,
+        origin: "ai",
+        createdAt: new Date(),
+      }));
+    selectQueue.push(
+      [CONV],
+      [PROFILE],
+      largo, // historial
+      [], // kb
+      STAGES,
+      [], // lead
+      [{ id: "ct_1", notes: null }], // ficha
+      [], // catálogo
+      [], // zonas
+      [{ id: "ct_1", notes: null }] // contacto de appendLeadNote
+    );
+
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    await runAgentTurn("cv_test");
+
+    const [conversationCall, annotationCall] = aiCalls as unknown as [
+      [unknown, { role: string; content: string }[]],
+      [unknown, { role: string; content: string }[]],
+    ];
+    // Conversación: system + los 12 mensajes.
+    expect(conversationCall[1]).toHaveLength(13);
+    // Anotación: system + los 6 últimos.
+    expect(annotationCall[1]).toHaveLength(7);
+    expect(annotationCall[1][1]!.content).toBe("mensaje 6");
+    expect(annotationCall[1].at(-1)!.content).toBe("mensaje 11");
+  });
+
+  it("la anotación usa OPENROUTER_ANNOTATION_MODEL cuando está configurado", async () => {
+    // `getEnv` memoiza por instancia de módulo: hay que reimportar para que lea
+    // la variable nueva.
+    vi.resetModules();
+    stubAgentTurnEnv({ OPENROUTER_ANNOTATION_MODEL: "modelo-barato" });
+    aiResults.push(okReply("hola"), okExtraction({}));
+    queue();
+
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    await runAgentTurn("cv_test");
+
+    // `aiCalls[i]` = [schema, messages, opts]
+    const annotationOptions = (aiCalls[1] as unknown[])[2] as {
+      model?: string;
+    };
+    expect(annotationOptions).toMatchObject({ model: "modelo-barato" });
   });
 });

@@ -412,3 +412,86 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
   error (`revisá`, `regístrate`). El guardián de registro no escanea `scripts/`,
   así que no lo detecta. No se tocó para no ampliar el diff de esta fase.
 - **Pendientes**: ninguno.
+
+---
+
+## F9 — P2 · Adelgazar la anotación (el plan se ajustó MIDIENDO)
+
+- **Estado**: hecha, **con el alcance corregido por la medición**
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Lo que se entrega**:
+  1. **Vocabulario de productos** en el prompt de anotación
+     (`renderCatalogVocabulary`): nombres, masas y formatos del catálogo, **sin
+     precios**. Antes la anotación extraía `productoInteres` sin haber visto
+     nunca el catálogo.
+  2. **Historial acotado**: `ANNOTATION_HISTORY_LIMIT = 6` mensajes para la
+     anotación (la conversación sigue viendo hasta 20).
+  3. **`OPENROUTER_ANNOTATION_MODEL`** opcional: la anotación puede usar su
+     propio modelo (extracción, no conversación). Sin la variable usa
+     `OPENROUTER_MODEL`, como antes.
+  4. **Prohibición de marcadores de posición** en el contrato, más
+     `isPlaceholderValue` (guard de código) que los descarta al escribir el
+     contacto. Sin el guard, un `"..."` cumplía `min(1)` y terminaba escrito en
+     la ficha, contaminando el prompt de los turnos siguientes.
+- **Lo que NO se entrega, y por qué (esto es lo importante de esta fase)**:
+
+  El plan pedía **sacar las instrucciones del negocio** (~2.981 caracteres) del
+  prompt de anotación, por considerarlas un prompt de conversador. **Se midió y
+  no se hizo.** El procedimiento: 129 turnos de cliente sobre los 39 casos reales
+  de la corrida `run_vngfka7jq6qxcy52mw7` (39 transcripts distintos, 3
+  repeticiones por punto), comparando por campo el comportamiento anterior
+  contra el nuevo.
+
+  Lo que se midió:
+
+  | Configuración | `productoInteres` | `formato` | `stage` |
+  |---|---|---|---|
+  | A · base (instrucciones + historial completo) | 25,6 % | 19,6 % | 96,4 % |
+  | Sin instrucciones (lo que pedía el plan) | 37,7 % | 32,6 % | 80,9 % |
+  | **Final: instrucciones + vocabulario + tope 6** | **29,2 %** | **23,5 %** | **94,1 %** |
+
+  - **El vocabulario mejora de forma consistente los campos que el plan protege**
+    (`productoInteres` y `formato`): subió en **todas** las corridas de medición,
+    entre +3 y +19 pp. Es el objetivo declarado del plan y se cumple.
+  - **Sacar las instrucciones mueve la ETAPA en la que termina el lead.** Con la
+    configuración sin instrucciones, **17 de 39 conversaciones terminan en una
+    etapa distinta** (casi siempre más atrás) contra una base.
+  - **Pero hay que ser honesto con el ruido**: incluso la variante que solo AGREGA
+    el vocabulario y usa el mismo historial completo que la base (`C20`) muestra
+    **12 de 39** casos con etapa final distinta. O sea, el **piso de ruido del
+    instrumento en `stage` es ~10-12 de 39**: el modelo, a temperatura 0,3 y con
+    la misma entrada, produce secuencias de etapa distintas entre corridas. La
+    lectura correcta es **no concluyente** para el efecto fino, y **negativa de
+    dirección** para sacar las instrucciones: fue el brazo peor en `stage` en
+    todas las mediciones.
+  - Tope de historial: los topes **6, 8 y 12 son indistinguibles** entre sí y no
+    muestran pérdida medible contra el historial completo. Se elige el más
+    barato.
+- **Costo real (el plan no lo cumple)**: la meta era **≥40 % más chico**. **No se
+  alcanza.** Números medidos con la configuración real de producción:
+  - Prompt de anotación (system): **4.683 → 5.036 caracteres** (+353, el
+    vocabulario). Es **más grande**, no más chico.
+  - Historial: los transcripts reales de la corrida son **cortos** (promedio 6,6
+    mensajes, máximo 10), así que el tope de 6 ahorra sólo **~146 caracteres por
+    turno**.
+  - Neto: **≈ +207 caracteres (~65 tokens) por turno**, a cambio de la mejora
+    medida en `productoInteres`/`formato`. En conversaciones largas el tope sí
+    ahorra de verdad, pero contra este corpus el ahorro es marginal.
+- **Decisión**: se entrega la mejora de calidad y **no** el recorte de
+  instrucciones. Sacar las instrucciones habría dado el número de la meta a
+  costa de un riesgo medido sobre la progresión del lead, que es el corazón del
+  CRM. Queda como decisión del dueño si quiere perseguir ese recorte con más
+  medición (el `expectAdvance` de la corrida de F10 es la evidencia siguiente).
+- **Evidencia**:
+  - Medición de extracción: 3 brazos × 129 puntos × 3 repeticiones por variante
+    (387 observaciones por brazo y por configuración), sobre transcripts reales
+    ya almacenados, contra el proveedor real. **No** es una corrida del
+    Laboratorio: no crea filas ni pasa por el juez.
+  - `tests/unit/prompts-catalog.test.ts`: vocabulario sin precios, catálogo vacío
+    no cambia el prompt, prohibición de marcadores, y que las instrucciones SÍ
+    están (con el porqué medido).
+  - `tests/unit/agent-extraction.test.ts`: el tope de 6 mensajes en la anotación
+    contra 12 en la conversación, el modelo de anotación configurable, y los tres
+    casos de marcadores descartados.
+  - Gate: typecheck OK · lint OK · build OK · test OK (400 tests, +10).
+- **Pendientes**: ninguno.

@@ -48,6 +48,40 @@ export const LeadExtraction = z.object({
 export type LeadExtractionType = z.infer<typeof LeadExtraction>;
 
 /**
+ * Marcadores de posición que un modelo puede devolver cuando copia la FORMA del
+ * ejemplo del contrato en vez de omitir un campo vacío.
+ *
+ * Medido en F9: al adelgazar el prompt de anotación, el modelo empezó a devolver
+ * `"..."` como valor de campos que no tenía —el ejemplo del contrato con
+ * placeholders pesaba más sin el resto del contexto—. Zod lo acepta (cumple
+ * `min(1)`) y el valor terminaba escrito en el contacto, contaminando la ficha y
+ * el prompt de los turnos siguientes.
+ *
+ * Se descartan al ESCRIBIR, no se rechaza la extracción: perder el resto de los
+ * campos por un placeholder sería peor que ignorar el placeholder.
+ */
+const PLACEHOLDERS = new Set([
+  "...",
+  "..",
+  "-",
+  "—",
+  "n/a",
+  "na",
+  "null",
+  "undefined",
+  "sin dato",
+  "sin datos",
+  "no aplica",
+  "no informado",
+]);
+
+/** ¿El valor es un marcador de posición en vez de un dato? */
+export function isPlaceholderValue(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return PLACEHOLDERS.has(value.trim().toLowerCase());
+}
+
+/**
  * Normaliza un nombre de etapa para comparar: sin tildes, minúsculas, sin
  * espacios sobrantes. El modelo suele devolver variaciones ("Interesados",
  * "EN CONVERSACIÓN", "en conversacion") que no deben fallar la resolución.
