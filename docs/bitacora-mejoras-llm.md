@@ -169,3 +169,45 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
     grupo de escalado.
   - Gate: typecheck OK · lint OK · build OK · test OK (313 tests, +15).
 - **Pendientes**: ninguno.
+
+---
+
+## F4 — P7 · Acotar el patrón de respaldo del handoff
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambio** (`src/server/ai/handoff.ts`): sale la alternativa suelta `un asesor`.
+  El patrón ahora exige un verbo de contacto a menos de 40 caracteres de un
+  objeto humano, o la petición explícita `atención humana`.
+- **Hallazgo corregido de paso**: el patrón tenía un hueco por TILDES. El verbo
+  `comunicar` no matcheaba "comunícame" y `derivar` no matcheaba "derívame": una
+  petición real de humano se perdía. En vez de enumerar las variantes
+  acentuadas, el texto se normaliza antes de evaluar (minúsculas y sin
+  diacríticos) y el patrón se escribe sin tildes. Una sola entrada por verbo.
+- **Verbos**: se agregó la familia `pas[ae]` —sin la cual "me pasas a un asesor",
+  que hoy es un caso verdadero del test, dejaba de disparar— y `deriv`. Se
+  eligió `pas[ae]` y no `pasa` para no atrapar "pasó" ni "pasado". **No** se
+  agregó `transferir`: en este negocio la transferencia bancaria es vocabulario
+  central y un falso positivo aborta una venta en curso.
+- **Fuera del patrón a propósito**: "atiendan"/"atiéndanme" es ambiguo (puede ser
+  una consulta de horarios, "¿atienden los sábados?"), así que no aborta por sí
+  solo; lo resuelve el modelo en la vía principal.
+- **Evidencia**:
+  - `tests/unit/handoff.test.ts` (27 tests, +13): los cuatro casos nuevos del
+    plan, tres casos de `pasa` sin objeto humano, el criterio documentado de
+    "atiéndanme" y el caso verdadero "derívame con un humano".
+  - El test de `pide_humano` referencia `PERSONAS` del producto en vez de copiar
+    el guion, así que falla si el guion deja de escalar.
+  - **Barrido sobre las personas del Laboratorio** (esbuild + node): de las 39
+    líneas de guion, dispara **exactamente 1**, y es la línea correcta de
+    `pide_humano` ("…quiero hablar con un humano"). Comparado con el patrón
+    previo, sobre el mismo corpus el resultado es idéntico (previo=1, nuevo=1).
+  - Gate: typecheck OK · lint OK · build OK · test OK (326 tests, +13).
+- **Límite honesto**: el caso que motiva P7 ("¿cuánto cobra un asesor de
+  eventos?") es un hallazgo de LECTURA DE CÓDIGO de la auditoría, no una línea que
+  exista en el corpus de personas. Ninguna persona lo ejercita, así que la corrida
+  de F10 tampoco lo va a mostrar. No se agregó una persona nueva a propósito:
+  cambiaría el tamaño del corpus y confundiría la comparación de F10. La evidencia
+  de P7 son los tests unitarios y el barrido de arriba, no una métrica del
+  Laboratorio.
+- **Pendientes**: ninguno.
