@@ -4,6 +4,11 @@
 > registra aquí su cambio, su corrida y su lectura. La vara de la sección 2 se
 > define **antes** de tocar código y no se ajusta después para justificar un
 > resultado.
+>
+> La evidencia cruda del contexto que recibe el agente (qué se envía en cada
+> vuelta, qué cambia entre turnos y por qué) está en
+> `docs/auditoria-contexto-agente.md`, con la captura literal de una conversación
+> completa. Es el insumo para la auditoría externa.
 
 Datos congelados durante todo el plan (regla 3 del protocolo): `agent_profile`,
 KB, catálogo y zonas no se modifican. Un cambio de datos invalida las
