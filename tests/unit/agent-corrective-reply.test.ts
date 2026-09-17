@@ -94,10 +94,13 @@ describe("pipeline: corrección cuando la acción no trae respuesta", () => {
   });
 
   it("conversación sin texto → corrige y responde conservando la nota", async () => {
+    // El mock despacha por orden de INVOCACIÓN. Desde P1 la conversación y la
+    // anotación se lanzan en paralelo, así que el orden es: conversación,
+    // anotación, y recién después la corrección de la conversación.
     responses.push(
       { reply: "" }, // llamada 1 (conversación): sin texto
-      { reply: "Te paso los datos de transferencia." }, // corrección
-      { note: "quiere transferir", stage: "Interesado" } // llamada 2 (anotación)
+      { note: "quiere transferir", stage: "Interesado" }, // llamada 2 (anotación)
+      { reply: "Te paso los datos de transferencia." } // corrección
     );
 
     selectQueue.push(

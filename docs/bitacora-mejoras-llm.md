@@ -74,3 +74,49 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
   variable afecta conversación, anotación y juez. Distinguirla por rol es otra
   decisión y queda fuera de alcance.
 - **Pendientes**: ninguno.
+
+---
+
+## F2 — P1 · Anotación fuera del camino crítico
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambios** (`src/server/ai/pipeline.ts`):
+  - `annotationMessages` se arma ANTES de llamar al proveedor: su entrada solo
+    depende del historial y del system de extracción, nunca del `reply`.
+  - La conversación y la anotación se lanzan **en paralelo** y la entrega ocurre
+    sin esperar la extracción.
+  - La anotación se espera DESPUÉS de la entrega, para procesar etapa/nota y
+    cerrar la telemetría antes de retornar.
+  - Nuevo `settleAnnotation`: todo camino de salida consume la promesa de
+    anotación. `chatJson` no propaga error de proveedor, pero sí puede rechazar
+    si el entorno es inválido (`getEnv` lanza), y una promesa rechazada sin
+    manejo tumba el proceso. Cubre los dos caminos de salida temprana (proveedor
+    no configurado y fallo persistente → handoff `error`).
+  - `accumulateTiming(calls, latencyMs)` recibe la latencia explícita.
+- **Semántica de la latencia (decisión)**: `latencyMs` deja de ser la suma y pasa
+  a ser el tiempo de pared del tramo paralelo, medido con
+  `max(finConversación, finAnotación) − inicioParalelo`. La marca de fin de la
+  anotación se toma al RESOLVER su promesa, no al esperarla, para que la espera
+  posterior a la entrega no infle la cifra. Los TOKENS siguen sumándose: el
+  costo real del turno sí es la suma de las dos llamadas. `calls[0]` sigue siendo
+  la conversación, así que `model` y `provider` no cambian.
+- **Evidencia**:
+  - Test nuevo en `tests/unit/lab-sandbox.test.ts`: con la conversación en 20 ms
+    y la anotación en 250 ms, el mensaje saliente se persiste ANTES de que la
+    anotación resuelva, y el turno igual espera la anotación antes de retornar
+    (el Laboratorio mide el turno completo y el `finalStage` no queda a medias).
+  - **Prueba de mutación**: reintroduciendo temporalmente `await annotationPromise`
+    antes de la entrega (orden secuencial previo), el test FALLA con
+    `expected … to be less than …`. Vuelto a paralelo, pasa. El test no es una
+    tautología.
+  - El test de telemetría ahora distingue máximo de suma con retardos reales:
+    dos llamadas de 180 ms dan una latencia ≥180 ms y <340 ms (la suma sería
+    ~360 ms).
+  - `tests/unit/agent-corrective-reply.test.ts`: se reordenó el fixture del mock,
+    que despacha por orden de invocación. El orden de llamadas pasó de
+    conversación→corrección→anotación a conversación→anotación→corrección.
+  - Gate: typecheck OK · lint OK · build OK · test OK (298 tests, +1).
+- **Sin cambios**: el sandbox del Laboratorio, la semántica de etapa (allowlist y
+  solo avance) y el orden cronológico del historial.
+- **Pendientes**: ninguno.
