@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * El modelo chico suele devolver una acción sin texto (update_lead solo con
- * nota, o none) y dejar al cliente colgado. El pipeline pide UNA corrección y
- * adjunta el texto a la acción original, preservando la decisión.
+ * El modelo chico suele devolver reply vacío y dejar al cliente colgado. El
+ * pipeline pide UNA corrección de la llamada de conversación; la anotación
+ * (segunda llamada) conserva su propio dato del lead.
  */
 
 const graphRequest = vi.fn();
@@ -93,15 +93,11 @@ describe("pipeline: corrección cuando la acción no trae respuesta", () => {
     vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
   });
 
-  it("update_lead sin reply → corrige y responde conservando la nota", async () => {
+  it("conversación sin texto → corrige y responde conservando la nota", async () => {
     responses.push(
-      { action: "update_lead", note: "quiere transferir", stage: "Interesado" },
-      {
-        action: "update_lead",
-        note: "x",
-        reply: "Te paso los datos de transferencia.",
-        stage: "Interesado",
-      }
+      { reply: "" }, // llamada 1 (conversación): sin texto
+      { reply: "Te paso los datos de transferencia." }, // corrección
+      { note: "quiere transferir", stage: "Interesado" } // llamada 2 (anotación)
     );
 
     selectQueue.push(

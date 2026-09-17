@@ -1,4 +1,4 @@
-import { JUDGE_MARKER } from "@/server/ai/prompts";
+import { ANNOTATION_MARKER, JUDGE_MARKER } from "@/server/ai/prompts";
 
 /**
  * Proveedor LLM determinista para el self-test (contrato mocks.md).
@@ -45,28 +45,41 @@ export function aiMockCompletion(messages: InMessage[]): string {
 
   const text = lastUser.toLowerCase();
 
+  // Segunda llamada del turno (anotación): extracción determinista de datos del
+  // lead. El pipeline la trata como best-effort y la valida con `LeadExtraction`.
+  if (system.includes(ANNOTATION_MARKER)) {
+    if (
+      text.includes("lo compro") ||
+      text.includes("quiero comprar") ||
+      text.includes("me lo llevo")
+    ) {
+      return JSON.stringify({
+        stage: "Interesado",
+        note: "Intención de compra explícita.",
+      });
+    }
+    return JSON.stringify({});
+  }
+
+  // Llamada de conversación: SOLO texto para el cliente + handoff.
   // Persona pide_humano (el regex de respaldo captura la frase canónica; esta
   // rama cubre variantes que llegan al modelo).
   if (text.includes("humano") || text.includes("asesor")) {
-    return JSON.stringify({ action: "handoff", reason: "cliente" });
+    return JSON.stringify({ reply: "", handoff: true });
   }
 
-  // Intención de compra → mover a Interesado.
   if (
     text.includes("lo compro") ||
     text.includes("quiero comprar") ||
     text.includes("me lo llevo")
   ) {
     return JSON.stringify({
-      action: "move_stage",
-      stage: "Interesado",
-      reply: "¡Excelente! Te aparto el producto y un compañero te confirma el pago.",
+      reply:
+        "¡Excelente! Te aparto el producto y un compañero te confirma el pago.",
+      handoff: false,
     });
   }
 
   const eco = lastUser.slice(0, 80);
-  return JSON.stringify({
-    action: "reply",
-    text: `Respuesta de prueba sobre: ${eco}`,
-  });
+  return JSON.stringify({ reply: `Respuesta de prueba sobre: ${eco}` });
 }

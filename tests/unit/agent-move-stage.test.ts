@@ -14,20 +14,27 @@ vi.mock("@/lib/meta/client", async (importOriginal) => {
   return { ...original, graphRequest };
 });
 
-let nextAction: Record<string, unknown> = {};
+// El turno hace DOS llamadas (conversación y anotación): el mock devuelve una
+// secuencia, en orden. La primera respuesta es la conversación; la segunda, la
+// anotación.
+const aiResponses: Record<string, unknown>[] = [];
+let aiCall = 0;
 
 vi.mock("@/lib/ai", () => ({
-  chatJson: vi.fn(() =>
-    Promise.resolve({
+  chatJson: vi.fn(() => {
+    const data =
+      aiResponses[Math.min(aiCall, aiResponses.length - 1)] ?? {};
+    aiCall++;
+    return Promise.resolve({
       ok: true,
-      data: nextAction,
+      data,
       raw: "{}",
       model: "modelo-test",
       latencyMs: 120,
       usage: null,
       provider: "test",
-    })
-  ),
+    });
+  }),
 }));
 
 const selectQueue: unknown[][] = [];
@@ -132,15 +139,16 @@ describe("pipeline: etapa como campo independiente de la acción", () => {
     selectQueue.length = 0;
     inserts.length = 0;
     updates.length = 0;
+    aiResponses.length = 0;
+    aiCall = 0;
     vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
   });
 
   it("una acción reply con stage mueve el lead y responde", async () => {
-    nextAction = {
-      action: "reply",
-      text: "¡Genial! Te paso la info.",
-      stage: "interesados",
-    };
+    aiResponses.push(
+      { reply: "¡Genial! Te paso la info." }, // conversación
+      { stage: "interesados" } // anotación
+    );
     queue();
 
     const { runAgentTurn } = await import("@/server/ai/pipeline");
@@ -167,7 +175,10 @@ describe("pipeline: etapa como campo independiente de la acción", () => {
   });
 
   it("no retrocede: si el lead ya está en Interesado, no lo vuelve a Nuevo", async () => {
-    nextAction = { action: "reply", text: "ok", stage: "Nuevo" };
+    aiResponses.push(
+      { reply: "ok" }, // conversación
+      { stage: "Nuevo" } // anotación
+    );
     queue({ lead: [{ stageId: "stg_int" }] });
 
     const { runAgentTurn } = await import("@/server/ai/pipeline");

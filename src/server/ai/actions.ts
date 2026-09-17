@@ -1,79 +1,51 @@
 import { z } from "zod";
 
 /**
- * Acción tipada del agente: exactamente UNA por turno (FR-021).
- * El servidor valida cada acción contra sus allowlists (etapas de la org);
- * lo que no valida se degrada, nunca se ejecuta a ciegas.
+ * Contratos de salida del agente, UNO por llamada.
+ *
+ * Antes UNA sola llamada hacía dos trabajos a la vez (conversar y llenar la
+ * ficha del CRM) y el modelo terminaba hablándole al esquema en vez de al
+ * cliente. Ahora el turno hace DOS llamadas con contratos disjuntos:
+ * - `ConversationReply` — la llamada de conversación: solo produce el texto que
+ *   recibe el cliente.
+ * - `LeadExtraction` — la llamada de anotación: solo extrae datos del lead.
+ *
+ * El servidor valida cada salida con Zod: lo que no valida no se ejecuta.
  */
+
+/** Llamada 1 — conversación: el modelo solo produce texto para el cliente. */
+export const ConversationReply = z.object({
+  reply: z.string(),
+  handoff: z.boolean().optional(),
+});
+
+export type ConversationReplyType = z.infer<typeof ConversationReply>;
+
 /**
- * Etapa objetivo del lead: campo INDEPENDIENTE de la acción, presente en toda
- * respuesta. El modelo clasifica el estado comercial en cada turno sin competir
- * con la elección de acción (con `move_stage` como acción única, el modelo
- * elegía `reply` y el lead nunca se movía).
+ * Llamada 2 — anotación: el modelo solo extrae datos del lead.
+ *
+ * A PROPÓSITO sin `superRefine` que exija al menos un campo: la extracción puede
+ * venir vacía (no había nada que anotar) y eso NO es un error. La decisión de
+ * escribir o no la toma el pipeline.
  */
-const stageField = { stage: z.string().min(1).optional() };
+export const LeadExtraction = z.object({
+  stage: z.string().min(1).optional(),
+  note: z.string().min(1).optional(),
+  empresa: z.string().min(1).max(200).optional(),
+  rubro: z.string().min(1).max(200).optional(),
+  comuna: z.string().min(1).max(120).optional(),
+  rut: z.string().min(1).max(40).optional(),
+  razonSocial: z.string().min(1).max(200).optional(),
+  giro: z.string().min(1).max(200).optional(),
+  direccionFacturacion: z.string().min(1).max(300).optional(),
+  email: z.string().min(1).max(200).optional(),
+  frecuenciaDespacho: z.string().min(1).max(120).optional(),
+  volumenSemanal: z.string().min(1).max(120).optional(),
+  productoInteres: z.string().min(1).max(200).optional(),
+  formato: z.string().min(1).max(120).optional(),
+});
 
-export const AgentAction = z
-  .discriminatedUnion("action", [
-    z.object({ action: z.literal("none"), ...stageField }),
-    z.object({ action: z.literal("reply"), text: z.string().min(1), ...stageField }),
-    z.object({
-      action: z.literal("update_lead"),
-      note: z.string().min(1).optional(),
-      reply: z.string().optional(),
-      ...stageField,
-      // 005 — campos comerciales estructurados del lead (último valor gana).
-      empresa: z.string().min(1).max(200).optional(),
-      rubro: z.string().min(1).max(200).optional(),
-      comuna: z.string().min(1).max(120).optional(),
-      rut: z.string().min(1).max(40).optional(),
-      razonSocial: z.string().min(1).max(200).optional(),
-      giro: z.string().min(1).max(200).optional(),
-      direccionFacturacion: z.string().min(1).max(300).optional(),
-      email: z.string().min(1).max(200).optional(),
-      frecuenciaDespacho: z.string().min(1).max(120).optional(),
-      volumenSemanal: z.string().min(1).max(120).optional(),
-      productoInteres: z.string().min(1).max(200).optional(),
-      formato: z.string().min(1).max(120).optional(),
-    }),
-    z.object({
-      action: z.literal("move_stage"),
-      stage: z.string().min(1),
-      reply: z.string().optional(),
-    }),
-    z.object({
-      action: z.literal("handoff"),
-      reason: z.string().optional(),
-      farewell: z.string().optional(),
-      ...stageField,
-    }),
-  ])
-  .superRefine((val, ctx) => {
-    if (
-      val.action === "update_lead" &&
-      val.note === undefined &&
-      val.empresa === undefined &&
-      val.rubro === undefined &&
-      val.comuna === undefined &&
-      val.rut === undefined &&
-      val.razonSocial === undefined &&
-      val.giro === undefined &&
-      val.direccionFacturacion === undefined &&
-      val.email === undefined &&
-      val.frecuenciaDespacho === undefined &&
-      val.volumenSemanal === undefined &&
-      val.productoInteres === undefined &&
-      val.formato === undefined
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "update_lead requiere una nota o al menos un campo estructurado",
-      });
-    }
-  });
-
-export type AgentActionType = z.infer<typeof AgentAction>;
+export type LeadExtractionType = z.infer<typeof LeadExtraction>;
 
 /**
  * Normaliza un nombre de etapa para comparar: sin tildes, minúsculas, sin
@@ -102,7 +74,7 @@ function singularize(value: string): string {
 /**
  * Resuelve el nombre de etapa devuelto por el modelo contra las etapas reales
  * de la organización: exacto → normalizado (sin tildes/case/espacios) →
- * singular/plural. Sin match: degradar a reply/none (nunca mover a ciegas).
+ * singular/plural. Sin match: `null` (nunca mover a ciegas).
  */
 export function resolveStage(
   requested: string,
@@ -120,14 +92,4 @@ export function resolveStage(
       (s) => singularize(normalizeStageName(s.name)) === targetSingular
     ) ?? null
   );
-}
-
-/** Degrada una move_stage sin etapa válida (FR-021 / contrato ai.md). */
-export function degradeAction(action: AgentActionType): AgentActionType {
-  if (action.action === "move_stage") {
-    return action.reply
-      ? { action: "reply", text: action.reply }
-      : { action: "none" };
-  }
-  return action;
 }

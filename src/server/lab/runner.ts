@@ -324,7 +324,7 @@ async function runOneCase(
  * instrumento siga siendo confiable.
  *
  * Lo que SÍ persiste entre corridas son los contactos de prueba ya creados (y
- * sus notas y campos comerciales acumulados por `update_lead`). Efecto medido
+ * sus notas y campos comerciales acumulados por la llamada de anotación). Efecto medido
  * sobre la atribución: nulo hoy, porque ni el prompt del agente ni el juez leen
  * esos campos (el agente recibe perfil, KB, etapas, catálogo, zonas e historial
  * de mensajes; el juez recibe el transcript). Advertencia para el futuro: si el

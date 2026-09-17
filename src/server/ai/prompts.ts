@@ -12,8 +12,10 @@
  *   chileno ni ningún otro). El registro del código es deliberado.
  *
  * ESTRUCTURA POR NIVELES (precedencia N1 > N2 > N3 en el prompt):
- * - CONTRATO_TECNICO: plomería técnica del producto (JSON de salida + etapa).
- *   No es un nivel de instrucción.
+ * - CONTRATO_TECNICO: plomería técnica de la llamada de CONVERSACIÓN (JSON de
+ *   salida del texto para el cliente). No es un nivel de instrucción.
+ * - CONTRATO_ANOTACION: plomería técnica de la llamada de ANOTACIÓN (JSON de
+ *   extracción de datos del lead). Tampoco es un nivel de instrucción.
  * - NIVEL_1_VERDAD_DEL_SISTEMA: capacidades reales del canal, derivadas del
  *   contrato de acciones. No es conducta.
  * - NIVEL_2_CONDUCTA_UNIVERSAL: conducta válida para cualquier negocio.
@@ -107,6 +109,9 @@ export function renderKb(entries: KbEntry[]): string {
     .join("\n\n");
 }
 
+/** Marcador de la llamada de anotación: el ai-mock despacha por él. */
+export const ANNOTATION_MARKER = "[ANOTACION]";
+
 /**
  * Ficha comercial del cliente ya capturada por el agente.
  *
@@ -183,26 +188,40 @@ export function renderClientFile(
 }
 
 /**
- * CONTRATO_TECNICO — contrato JSON de salida + reglas de la etapa.
+ * CONTRATO_TECNICO — contrato JSON de salida de la llamada de CONVERSACIÓN.
  *
  * NO es un nivel de instrucción: es plomería técnica del producto. Fija el
- * formato exacto que el modelo debe emitir (acción + `stage`) y cómo resolver el
- * campo `stage` contra el pipeline real. No expresa voz ni conducta del negocio;
- * si el esquema de acciones cambia, este bloque cambia con él.
+ * formato exacto del ÚNICO mensaje que recibe el cliente. No menciona etapa,
+ * notas ni campos comerciales del lead: la ficha se resuelve en la llamada de
+ * anotación, con su propio contrato (`CONTRATO_ANOTACION`).
  */
 const CONTRATO_TECNICO: readonly string[] = [
-  "En cada turno responde ÚNICAMENTE un objeto JSON con la acción y la etapa del lead:",
-  '- {"action":"none","stage":"<etapa>"} — no responder nada.',
-  '- {"action":"reply","text":"...","stage":"<etapa>"} — responder al cliente.',
-  '- {"action":"update_lead","note":"...","reply":"...","stage":"<etapa>"} — guardar una nota del lead (reply opcional).',
-  '- {"action":"update_lead","empresa":"...","comuna":"...","reply":"...","stage":"<etapa>"} — guardar o actualizar un campo comercial del lead (empresa, rubro, comuna, rut, razon_social, giro, direccion_facturacion, email, frecuencia_despacho, volumen_semanal, producto_interes, formato). Puede combinarse con note.',
-  '- {"action":"handoff","reason":"...","farewell":"...","stage":"<etapa>"} — escalar a un humano (farewell opcional para despedirse).',
-  'El campo "stage" va SIEMPRE y usa el nombre EXACTO de una etapa de la lista de arriba. Escriba SOLO el nombre, sin la anotación entre paréntesis (ej.: "Cliente", nunca "Cliente (ganado)").',
+  "En cada turno responde ÚNICAMENTE un objeto JSON con el mensaje para el cliente:",
+  '- {"reply":"...","handoff":false} — el texto que recibe el cliente.',
+  '- {"reply":"...","handoff":true} — el cliente pide una persona: se despide en reply y la conversación pasa a atención humana.',
+  'El campo "reply" es SIEMPRE el texto que recibe el cliente por WhatsApp: escríbalo ahí y en ningún otro lado.',
+  'El campo "handoff" va en true SOLO cuando hay que pasar la conversación a una persona; en cualquier otro caso, false u omitido.',
+  'Si en este turno no corresponde responder nada, use "reply" vacío ("").',
+];
+
+/**
+ * CONTRATO_ANOTACION — contrato JSON de la llamada de ANOTACIÓN.
+ *
+ * Es la segunda llamada del turno: extracción pura de datos del lead, no una
+ * decisión de conducta. Conserva las reglas de la etapa que antes vivían en el
+ * contrato de conversación (nombre exacto, solo avance, ganado/perdido).
+ */
+const CONTRATO_ANOTACION: readonly string[] = [
+  "Extraiga de la conversación SOLO los datos del lead que estén explícitos. Responda ÚNICAMENTE un objeto JSON:",
+  '- {"stage":"<etapa>","note":"...","empresa":"...","comuna":"...","rut":"...","razonSocial":"...","giro":"...","direccionFacturacion":"...","email":"...","frecuenciaDespacho":"...","volumenSemanal":"...","productoInteres":"...","formato":"..."}',
+  "Incluya solo los campos de los que tenga dato; lo ausente se omite. Si no hay nada que anotar, responda {}.",
+  'El campo "stage" usa el nombre EXACTO de una etapa de la lista de arriba. Escriba SOLO el nombre, sin la anotación entre paréntesis (ej.: "Cliente", nunca "Cliente (ganado)").',
   "Reglas de la etapa (importante):",
   "- El lead arranca en la primera etapa. Avance de etapa cuando el cliente avance en el proceso de compra.",
   "- Señal clara de avance (el cliente dice que quiere comprar, pide pagar/transferir o confirma el pedido) → avance ese mismo turno a la etapa abierta que represente interés; no se quede en la etapa inicial.",
   "- No retroceda de etapa: si no hay avance, repita la etapa actual.",
   "- Use la etapa marcada (ganado) solo cuando el cliente confirme la compra o el pago, y (perdido) si declina.",
+  'La "note" es una observación breve del estado comercial; NUNCA texto dirigido al cliente.',
 ];
 
 /**
@@ -247,7 +266,7 @@ const CIERRE_DE_CONVERSACION: readonly string[] = [
   "- Sea SIEMPRE el último en escribir: si el cliente mandó un mensaje, tiene que responderle. Nunca deje el último mensaje del cliente sin respuesta.",
   "- Detecte el cierre del cliente: 'gracias', 'chau', 'nos vemos', 'ok', 'dale', 'lo voy a pensar', 'orita aviso', 'quedo atento', 'cualquier cosa te escribo'. Ante CUALQUIERA de esos, responda con un cierre cordial breve que diga que quedamos a la orden para cualquier otra duda.",
   "- Si el cliente mezcla una pregunta con un cierre, primero responda la pregunta y cierre cordial en el MISMO mensaje.",
-  "- Al escalar a un humano, despídase SIEMPRE en el mismo turno (farewell) con ese tono cordial antes de que la conversación pase a atención humana.",
+  "- Al escalar a un humano, despídase SIEMPRE en el mismo turno con ese tono cordial (dentro de reply, con handoff en true) antes de que la conversación pase a atención humana.",
 ];
 
 /**
@@ -258,7 +277,7 @@ const CIERRE_DE_CONVERSACION: readonly string[] = [
  */
 const FORMATO_DE_MENSAJES: readonly string[] = [
   "Formato de sus mensajes (obligatorio):",
-  "- Si el cliente espera una respuesta (preguntó algo o mandó un mensaje), su acción SIEMPRE debe incluir texto para responderle (reply/text). Nunca lo deje sin respuesta: puede combinar update_lead o move_stage con reply.",
+  "- Si el cliente espera una respuesta (preguntó algo o mandó un mensaje), incluya SIEMPRE el texto en reply. Nunca lo deje sin respuesta.",
   "- Máximo 2-3 líneas. WhatsApp no es un email.",
   "- Un mensaje = UNA acción + MÁXIMO una pregunta. Nunca apile dos preguntas.",
   "- Precio: escríbalo así y SOLO una vez por producto: `$2.220 neto ($2.641,80 con IVA)`. Copie los números EXACTOS del catálogo; la palabra 'IVA' aparece UNA sola vez por precio.",
@@ -276,6 +295,10 @@ const FORMATO_DE_MENSAJES: readonly string[] = [
  *
  * Orden estable: identidad y configuración del negocio arriba; el bloque fijo de
  * reglas al final, en el orden CONTRATO_TECNICO → N1 → N2 → cierre → formato.
+ *
+ * Las etapas y la etapa actual llegan como CONTEXTO (otra fase): sirven para
+ * conversar con el estado del lead a la vista. El contrato de SALIDA de este
+ * prompt NO incluye campos del CRM — esos viven en `buildAnnotationSystemPrompt`.
  */
 export function buildAgentSystemPrompt(input: {
   profile: AgentProfile;
@@ -321,6 +344,41 @@ export function buildAgentSystemPrompt(input: {
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
     clientFileBlock,
     reglasFijas,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * System prompt de la llamada de ANOTACIÓN (segunda llamada del turno).
+ *
+ * RECORTE DELIBERADO: es extracción, no conversación. No incluye el catálogo, ni
+ * las zonas de envío, ni la voz de marca (tono, saludo, reglas de escalado): para
+ * reconocer datos del lead alcanza con las etapas, la etapa actual, las
+ * instrucciones del negocio que los describen y el bloque `CONTRATO_ANOTACION`.
+ * Por eso este prompt es notoriamente más chico que el de conversación, y no debe
+ * "igualarse" agregándole contexto de conversación.
+ */
+export function buildAnnotationSystemPrompt(input: {
+  profile: AgentProfile;
+  stages: { name: string; kind?: string }[];
+  currentStage?: string | null;
+}): string {
+  const stageList = input.stages
+    .map((s, i) => {
+      const tag =
+        s.kind === "won" ? " (ganado)" : s.kind === "lost" ? " (perdido)" : "";
+      return `${i + 1}. ${s.name}${tag}`;
+    })
+    .join(" · ");
+  return [
+    `${ANNOTATION_MARKER} Extraiga datos comerciales del lead de esta conversación. No redacte la respuesta al cliente.`,
+    input.profile.instructions
+      ? `Instrucciones del negocio (referencia para reconocer los datos):\n${input.profile.instructions}`
+      : null,
+    `Etapas del pipeline (en orden): ${stageList}`,
+    `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
+    CONTRATO_ANOTACION.join("\n"),
   ]
     .filter(Boolean)
     .join("\n\n");

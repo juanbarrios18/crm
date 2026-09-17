@@ -6,9 +6,18 @@ import { chatJson, type ChatMessage, type ChatTiming } from "@/lib/ai";
 import { publish } from "@/server/events/bus";
 import { isWindowOpen } from "@/server/inbox/window";
 import { SendError, sendText } from "@/server/inbox/send";
-import { AgentAction, degradeAction, resolveStage, type AgentActionType } from "@/server/ai/actions";
+import {
+  ConversationReply,
+  LeadExtraction,
+  resolveStage,
+  type LeadExtractionType,
+} from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
-import { buildAgentSystemPrompt, CLOSING_FAREWELL } from "@/server/ai/prompts";
+import {
+  buildAgentSystemPrompt,
+  buildAnnotationSystemPrompt,
+  CLOSING_FAREWELL,
+} from "@/server/ai/prompts";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { notifyHandoff } from "@/server/push/notify";
 
@@ -38,55 +47,44 @@ function coalesceMap(): Map<string, CoalesceEntry> {
   return globalForAgent.__agentCoalesce;
 }
 
-/** true si la acción incluye un mensaje visible para el cliente. */
-function actionHasReply(action: AgentActionType): boolean {
-  switch (action.action) {
-    case "reply":
-      return true;
-    case "update_lead":
-    case "move_stage":
-      return Boolean(action.reply);
-    case "handoff":
-      return Boolean(action.farewell);
-    case "none":
-      return false;
-  }
-}
+/** Llamada al modelo que reportó timing (para acumular la telemetría del turno). */
+type TimedCall = {
+  model: string;
+  latencyMs: number;
+  usage: { promptTokens: number | null; completionTokens: number | null; cachedTokens: number | null } | null;
+  provider: string | null;
+};
 
-/** Texto de respuesta de una acción, si lo tiene. */
-function replyText(action: AgentActionType): string | undefined {
-  switch (action.action) {
-    case "reply":
-      return action.text;
-    case "update_lead":
-    case "move_stage":
-      return action.reply;
-    case "handoff":
-      return action.farewell;
-    case "none":
-      return undefined;
-  }
-}
-
-/** Adjunta el texto de respuesta a la acción original (preserva su decisión). */
-function attachReply(
-  action: AgentActionType,
-  text: string | undefined
-): AgentActionType {
-  if (!text) return action;
-  switch (action.action) {
-    case "none":
-      return action.stage
-        ? { action: "reply", text, stage: action.stage }
-        : { action: "reply", text };
-    case "reply":
-      return action;
-    case "update_lead":
-    case "move_stage":
-      return { ...action, reply: text };
-    case "handoff":
-      return { ...action, farewell: text };
-  }
+/**
+ * Suma la telemetría de TODAS las llamadas del turno (conversación + corrección
+ * opcional + anotación) en UN `ChatTiming`. Se suma a propósito: el turno hace
+ * más de una llamada y el Laboratorio mide el costo/latencia REAL, no el de una
+ * sola. `model` y `provider` son los de la llamada de conversación (la principal).
+ *
+ * Tokens: un `null` se trata como 0 SOLO si otra llamada reportó valor para ese
+ * mismo token; si ninguna lo reporta, queda `null` (no se inventa un 0).
+ */
+function accumulateTiming(calls: TimedCall[]): ChatTiming {
+  const sumToken = (
+    pick: (u: NonNullable<TimedCall["usage"]>) => number | null
+  ): number | null => {
+    let total: number | null = null;
+    for (const call of calls) {
+      if (!call.usage) continue;
+      const value = pick(call.usage);
+      if (value !== null) total = (total ?? 0) + value;
+    }
+    return total;
+  };
+  const primary = calls[0]!;
+  return {
+    model: primary.model,
+    latencyMs: calls.reduce((acc, call) => acc + call.latencyMs, 0),
+    promptTokens: sumToken((u) => u.promptTokens),
+    completionTokens: sumToken((u) => u.completionTokens),
+    cachedTokens: sumToken((u) => u.cachedTokens),
+    provider: primary.provider,
+  };
 }
 
 /** Punto de entrada con debounce (mensajes entrantes reales). */
@@ -267,104 +265,134 @@ export async function runAgentTurn(
       })),
   ];
 
-  const result = await chatJson(AgentAction, messages);
-  if (!result.ok) {
-    if (result.error === "not_configured") return null;
+  // ── Llamada 1 — CONVERSACIÓN ──────────────────────────────────────────────
+  // El turno se parte en dos llamadas: esta produce SOLO el texto para el
+  // cliente; la anotación (más abajo) resuelve etapa y campos por separado.
+  const conversationResult = await chatJson(ConversationReply, messages);
+  if (!conversationResult.ok) {
+    if (conversationResult.error === "not_configured") return null;
     // Fallo persistente del proveedor o salida imposible → escalar (FR-022).
-    console.error(`[agente] fallo del proveedor (raw): ${result.detail}`);
+    console.error(
+      `[agente] fallo del proveedor (conversación, raw): ${conversationResult.detail}`
+    );
     await applyHandoff(conversationId, organizationId, "error");
     return null;
   }
 
-  // Timing del turno: modelo usado + latencia + tokens/provider (Laboratorio).
-  const timing: ChatTiming = {
-    model: result.model,
-    latencyMs: result.latencyMs,
-    promptTokens: result.usage?.promptTokens ?? null,
-    completionTokens: result.usage?.completionTokens ?? null,
-    cachedTokens: result.usage?.cachedTokens ?? null,
-    provider: result.provider,
-  };
+  const timedCalls: TimedCall[] = [
+    {
+      model: conversationResult.model,
+      latencyMs: conversationResult.latencyMs,
+      usage: conversationResult.usage,
+      provider: conversationResult.provider,
+    },
+  ];
 
-  let action: AgentActionType = result.data;
+  let reply = conversationResult.data.reply.trim();
+  const wantsHandoff = conversationResult.data.handoff === true;
 
-  // El cliente espera respuesta. El modelo chico suele "anotar" con update_lead
-  // (o devolver none) y olvidarse de responder. Si la acción no trae texto,
-  // pedimos UNA corrección para no dejar la conversación colgada.
-  if (!actionHasReply(action)) {
-    const corrective = await chatJson(AgentAction, [
+  // El cliente espera respuesta. Si el modelo devolvió reply vacío sin escalar,
+  // se pide UNA corrección para no dejar la conversación colgada. Si tampoco
+  // trae texto, el turno no envía nada (equivale al `none` anterior).
+  if (!reply && !wantsHandoff) {
+    const corrective = await chatJson(ConversationReply, [
       ...messages,
-      { role: "assistant", content: result.raw },
+      { role: "assistant", content: conversationResult.raw },
       {
         role: "system",
         content:
-          "El cliente espera una respuesta y su última acción no incluyó texto. " +
-          "Responda OTRA VEZ el JSON incluyendo SIEMPRE un mensaje cordial para el cliente " +
-          "(campo reply; si es handoff, farewell). Si el cliente se está despidiendo, " +
-          "agradeciendo o cerrando el tema, cierre con un mensaje que diga que quedamos " +
-          "a la orden para cualquier otra duda. No cambie la decisión de fondo.",
+          "El cliente espera una respuesta y su último turno no incluyó texto. " +
+          "Responda OTRA VEZ el JSON incluyendo SIEMPRE el mensaje cordial para el " +
+          "cliente en el campo reply. Si el cliente se está despidiendo, agradeciendo " +
+          "o cerrando el tema, cierre con un mensaje que diga que quedamos a la orden " +
+          "para cualquier otra duda.",
       },
     ]);
-    if (corrective.ok && actionHasReply(corrective.data)) {
-      // Se conserva la decisión original (nota/etapa) y se le adjunta el texto.
-      action = attachReply(action, replyText(corrective.data));
+    if (corrective.ok) {
+      timedCalls.push({
+        model: corrective.model,
+        latencyMs: corrective.latencyMs,
+        usage: corrective.usage,
+        provider: corrective.provider,
+      });
+      const corrected = corrective.data.reply.trim();
+      if (corrected) reply = corrected;
     }
   }
 
-  // Etapa objetivo: el modelo la emite como campo independiente en CUALQUIER
-  // acción (no compite con la elección de reply/move_stage). Se resuelve contra
-  // las etapas reales y solo avanza (nunca retrocede ni sale de ganado/perdido).
-  if (action.stage) {
-    const target = resolveStage(action.stage, stages);
-    if (!target) {
-      console.warn(
-        `[agente] etapa inexistente "${action.stage}" — ` +
-          `disponibles: ${stages.map((s) => s.name).join(", ")}.`
-      );
-      if (action.action === "move_stage") action = degradeAction(action);
-    } else {
-      const targetMeta = stages.find((s) => s.id === target.id);
-      const canAdvance =
-        currentStage === null ||
-        (currentStage.kind !== "won" &&
-          currentStage.kind !== "lost" &&
-          targetMeta !== undefined &&
-          targetMeta.position > currentStage.position);
-      if (canAdvance && target.id !== currentStageId) {
-        await moveLeadToStage(organizationId, conversation.contactId, target.id);
-        publish(organizationId, {
-          type: "conversation.updated",
-          data: { conversation: { id: conversationId } },
-        });
+  // ── Llamada 2 — ANOTACIÓN (best-effort) ───────────────────────────────────
+  // La extracción de etapa y campos NUNCA puede tumbar la conversación: si esta
+  // llamada falla, se registra un aviso y el turno sigue con la respuesta que ya
+  // se iba a entregar. Consulta solo las etapas y las instrucciones del negocio:
+  // es un prompt de extracción, notoriamente más chico que el de conversación.
+  const annotationMessages: ChatMessage[] = [
+    {
+      role: "system",
+      content: buildAnnotationSystemPrompt({
+        profile,
+        stages,
+        currentStage: currentStage?.name ?? null,
+      }),
+    },
+    ...messages.slice(1),
+  ];
+  const extraction = await chatJson(LeadExtraction, annotationMessages);
+  if (!extraction.ok) {
+    console.warn(
+      `[agente] extracción del lead falló, el turno continúa: ${extraction.detail}`
+    );
+  } else {
+    timedCalls.push({
+      model: extraction.model,
+      latencyMs: extraction.latencyMs,
+      usage: extraction.usage,
+      provider: extraction.provider,
+    });
+
+    // Etapa objetivo: se resuelve contra las etapas reales y solo avanza (nunca
+    // retrocede ni sale de ganado/perdido). Un nombre inexistente solo registra
+    // el aviso y no mueve el lead.
+    if (extraction.data.stage) {
+      const target = resolveStage(extraction.data.stage, stages);
+      if (!target) {
+        console.warn(
+          `[agente] etapa inexistente "${extraction.data.stage}" — ` +
+            `disponibles: ${stages.map((s) => s.name).join(", ")}.`
+        );
+      } else {
+        const targetMeta = stages.find((s) => s.id === target.id);
+        const canAdvance =
+          currentStage === null ||
+          (currentStage.kind !== "won" &&
+            currentStage.kind !== "lost" &&
+            targetMeta !== undefined &&
+            targetMeta.position > currentStage.position);
+        if (canAdvance && target.id !== currentStageId) {
+          await moveLeadToStage(organizationId, conversation.contactId, target.id);
+          publish(organizationId, {
+            type: "conversation.updated",
+            data: { conversation: { id: conversationId } },
+          });
+        }
       }
     }
+
+    // Nota y campos comerciales: si la extracción no trae nada, no se escribe.
+    await appendLeadNote(organizationId, conversation.contactId, extraction.data);
   }
 
-  if (action.action === "move_stage") {
-    if (action.reply) {
-      await deliverReply(conversation, action.reply);
-    }
+  // Timing del turno: suma REAL de todas las llamadas que ocurrieron (Laboratorio).
+  const timing = accumulateTiming(timedCalls);
+
+  // ── Entrega ───────────────────────────────────────────────────────────────
+  if (wantsHandoff) {
+    // El agente SIEMPRE cierra cordialmente: sin texto, usa el cierre determinista.
+    await deliverReply(conversation, reply || CLOSING_FAREWELL);
+    await applyHandoff(conversationId, organizationId, "modelo");
     return timing;
   }
-
-  switch (action.action) {
-    case "none":
-      return timing;
-    case "reply":
-      await deliverReply(conversation, action.text);
-      return timing;
-    case "update_lead": {
-      await appendLeadNote(organizationId, conversation.contactId, action);
-      if (action.reply) await deliverReply(conversation, action.reply);
-      return timing;
-    }
-    case "handoff": {
-      // El agente SIEMPRE cierra cordialmente: si el modelo no trajo farewell,
-      // se usa el cierre determinista antes de pasar a atención humana.
-      await deliverReply(conversation, action.farewell ?? CLOSING_FAREWELL);
-      await applyHandoff(conversationId, organizationId, "modelo");
-      return timing;
-    }
+  if (reply) {
+    await deliverReply(conversation, reply);
   }
   return timing;
 }
@@ -460,23 +488,30 @@ async function moveLeadToStage(
 async function appendLeadNote(
   organizationId: string,
   contactId: string,
-  fields: {
-    note?: string;
-    empresa?: string;
-    rubro?: string;
-    comuna?: string;
-    rut?: string;
-    razonSocial?: string;
-    giro?: string;
-    direccionFacturacion?: string;
-    email?: string;
-    frecuenciaDespacho?: string;
-    volumenSemanal?: string;
-    productoInteres?: string;
-    formato?: string;
-  }
+  fields: Omit<LeadExtractionType, "stage">
 ): Promise<void> {
+  // Una extracción vacía es válida: no hay nada que anotar y no se escribe.
+  const fieldKeys = [
+    "empresa",
+    "rubro",
+    "comuna",
+    "rut",
+    "razonSocial",
+    "giro",
+    "direccionFacturacion",
+    "email",
+    "frecuenciaDespacho",
+    "volumenSemanal",
+    "productoInteres",
+    "formato",
+  ] as const;
+  const hasStructuredField = fieldKeys.some(
+    (key) => fields[key] !== undefined
+  );
+  if (fields.note === undefined && !hasStructuredField) return;
+
   const db = getDb();
+
   const rows = await db
     .select({
       id: schema.contact.id,
@@ -500,23 +535,9 @@ async function appendLeadNote(
   const contact = rows[0];
   if (!contact) return;
 
-  // Último valor gana: cada campo estructurado presente en la acción
+  // Último valor gana: cada campo estructurado presente en la extracción
   // sobrescribe el valor previo; lo ausente se conserva.
   const patch: Partial<typeof schema.contact.$inferInsert> = {};
-  const fieldKeys = [
-    "empresa",
-    "rubro",
-    "comuna",
-    "rut",
-    "razonSocial",
-    "giro",
-    "direccionFacturacion",
-    "email",
-    "frecuenciaDespacho",
-    "volumenSemanal",
-    "productoInteres",
-    "formato",
-  ] as const;
   for (const key of fieldKeys) {
     if (fields[key] !== undefined) {
       patch[key] = fields[key];
