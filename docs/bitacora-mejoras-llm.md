@@ -495,3 +495,121 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
     casos de marcadores descartados.
   - Gate: typecheck OK · lint OK · build OK · test OK (400 tests, +10).
 - **Pendientes**: ninguno.
+
+---
+
+## F10 — Cierre: gate, E2E, corrida del Laboratorio y PR
+
+- **Estado**: hecha
+
+### 1 · Gate completo
+
+`pnpm typecheck` OK · `pnpm lint` OK · `pnpm build` OK · `pnpm test` OK
+(**400 tests**, 48 archivos).
+
+### 2 · Self-test E2E de comportamiento
+
+Corrido contra `pnpm dev` (nunca un build de producción) con los mocks, sobre una
+**base recién creada y migrada** (`vocero_e2e`), porque los mocks reusan
+`waMessageId` fijos y una base ya usada produce fallos fantasma.
+
+```text
+===== 90/90 checks OK, 0 fallos =====   (exit 0)
+```
+
+Tres cosas del entorno de pruebas hubo que resolver, y quedan documentadas
+porque no eran obvias:
+
+1. **`APP_BASE_URL` y el host de los mocks.** Con
+   `APP_BASE_URL=http://admin.localhost:3000`, las URLs de mock documentadas
+   (`http://localhost:3000/api/dev/...`) son tratadas como **web pública** por
+   `middleware.ts` y responden 404. El self-test necesita
+   `APP_BASE_URL=http://localhost:3000` (el setup de un solo puerto que documenta
+   `AGENTS.md`), tanto en el server como en su propio entorno — Better Auth
+   rechaza el origen si no coinciden (`INVALID_ORIGIN`).
+2. **El agente debe estar ENCENDIDO.** En una base nueva el registro crea el
+   `agent_profile` con `enabled = false` y el turno del agente no corre para
+   conversaciones reales. El quickstart ya lo lista como prerrequisito manual.
+3. **`AGENT_COALESCE_MS=0`** en el server: el guion espera la respuesta del
+   agente a los 2,5 s y el debounce por defecto es de 6 s.
+
+### 3 · Corrida del Laboratorio (la única autorizada)
+
+`run_uzw4zmt4fyg09sczm7lg`, 39 casos, **8 min 46 s**, mismo modelo
+(`google/gemini-2.5-flash-lite`) y mismo juez (`z-ai/glm-5.3-flash`) que la
+baseline. Comparación por **hallazgos y métricas operativas**, nunca por score
+(F7 cambió la semántica del instrumento).
+
+**Hallazgos (lo que el plan pedía comparar):**
+
+| tipo | antes | después |
+|---|---|---|
+| `tono` | 30 | **11** |
+| `fuera_de_kb` | 9 | 4 |
+| `debio_escalar` | 6 | 10 |
+| `afirmacion_sin_evidencia` | 5 | 12 |
+| `alucinacion` | 4 | 5 |
+| `judge_failed` | 1 | 0 |
+
+- **`tono` bajó 63 % (30 → 11).** La meta del plan era ≤5: **no se alcanza.**
+- **Casos verdes: 10 → 18.** Casos con al menos un hallazgo de tono: 25 → 9.
+- **La distribución de veredictos cambió fuerte** (amarillos 20 → 5, rojos 8 →
+  16). Es el efecto esperado de F7: antes el juez podía declarar amarillo
+  teniendo un hallazgo grave; ahora `afirmacion_sin_evidencia`, `debio_escalar` y
+  `alucinacion` fuerzan rojo por construcción. **El score no es comparable**
+  (54 → 58, sin valor comparativo).
+- **`afirmacion_sin_evidencia` y `debio_escalar` subieron.** No se atribuye con
+  esta evidencia: los hallazgos los produce un LLM y el instrumento tiene el
+  ruido que el propio F7 documenta. Queda como lo primero a mirar en la próxima
+  corrida.
+- **Sin hallazgos `pipeline` en ninguna de las dos corridas**: ningún lead dejó
+  de avanzar donde la persona lo exigía.
+
+**De dónde salen los 11 `tono` que quedan** (agrupados por evidencia) — es el
+dato más accionable de esta corrida:
+
+| origen | ~casos | qué es |
+|---|---|---|
+| "Quedamos a su disposición…" / `CLOSING_FAREWELL` | 4 | **Contradicción del producto**: `CIERRE_DE_CONVERSACION` pide "un cierre cordial breve que diga que quedamos a la orden" y el `CLOSING_FAREWELL` determinista dice literalmente "Quedamos a la orden…", que es exactamente lo que el prompt del juez marca como fórmula de call center. Es voz de PRODUCTO, no dato del negocio, y quedó **fuera del alcance de F8** (era la observación anotada ahí). Es la causa #1 de que no se llegue a ≤5. |
+| "Hola, [Prueba] Cliente enojado." | 2 | **Falso positivo del instrumento**: el agente saluda al contacto de prueba por su nombre, y el nombre del contacto de prueba es `[Prueba] …` (fixture del harness). No es un defecto del agente. |
+| Volcado de las 11 comunas en un mensaje | 1 | Incumplimiento real de `FORMATO_DE_MENSAJES` ("no vuelque todas las comunas"). |
+| "Como soy un asistente virtual…" | 1 | Incumplimiento real de la regla de no revelar que es una IA. |
+| Listas largas de datos pedidos | 2 | Incumplimiento real del formato breve. |
+
+**Métricas operativas:**
+
+| métrica | baseline | final | meta | veredicto |
+|---|---|---|---|---|
+| latencia del turno (ms) | 1.328 | **794** | máximo de 2 llamadas | mejora (F2) |
+| tokens de prompt por turno | — | 4.559 | ≤4.000 | **no cumplida** |
+| % de tokens con caché | 33,8 % | 12,2 % | ≥80 % de las llamadas | **no cumplida** |
+
+- **Latencia: 1.328 → 794 ms.** F2 funcionó: el cliente espera el máximo de las
+  dos llamadas en vez de la suma.
+- **Cuidado con la comparabilidad**: la corrida baseline registró **UNA llamada
+  por turno** (el propio plan lo dice: "1 llamada de 3.130"), mientras que la
+  final registra **dos**. Los 3.130 de la baseline son una llamada; los 4.559 de
+  la final son conversación + anotación. La comparación de tokens contra esos
+  3.130 **no es válida como regresión**; la referencia correcta es el ≈4.700 que
+  el plan calculó para dos llamadas.
+- **El objetivo de ≤4.000 tokens NO se cumple, y se sabe por qué**: el plan
+  contaba con adelgazar la anotación para bajar ≈840 tokens por turno, y ese
+  recorte **no se hizo** (ver F9: la medición mostró que sacar las instrucciones
+  mueve la etapa del lead). Medido con el proveedor real, los dos system prompts
+  suman ≈4.300 tokens (conversación 2.934 + anotación 1.366).
+- **La caché de prefijo NO mejoró** (33,8 % → 12,2 % de los tokens). F6 dejó el
+  orden correcto —el prefijo estable es contiguo y todo lo que cambia por turno
+  está al final—, pero la meta de ≥80 % no se alcanza. **La causa no está
+  establecida con esta evidencia**: la caché implícita la decide el proveedor
+  (enrutamiento entre upstreams, TTL, mínimo de prefijo) y la corrida corre 39
+  casos en paralelo. Queda como medición pendiente y como riesgo abierto del PR.
+- Huecos de tokens en la configuración final, medidos con el proveedor: el
+  catálogo (1.203 ch) y las reglas fijas (4.004 ch) son los bloques que más pesan
+  del prompt de conversación.
+
+### 4 · PR única
+
+Abierta con excepción de tamaño declarada y aprobada por el dueño (B1 de la
+aprobación del 2026-09-17). Sin merge automático: mergea el humano.
+- **Pendientes**: ninguno. Las decisiones abiertas (voz del cierre, persistir el
+  recorte de la anotación, caché) van al cuerpo del PR y al chat.
