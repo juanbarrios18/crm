@@ -75,6 +75,8 @@ export function buildInboundPayload(input: {
   text?: string;
   waMessageId?: string;
   timestamp?: number;
+  /** Referral de anuncio de clic a WhatsApp, tal como lo adjunta Meta. */
+  referral?: Record<string, unknown>;
 } & MockMediaInput) {
   const type = input.type ?? "text";
   const message: Record<string, unknown> = {
@@ -84,6 +86,8 @@ export function buildInboundPayload(input: {
   };
   if (input.from) message.from = input.from;
   if (input.fromUserId) message.from_user_id = input.fromUserId;
+  // Meta coloca el referral dentro del mensaje, al mismo nivel que `text`.
+  if (input.referral) message.referral = input.referral;
   applyMockContent(message, type, input);
 
   const contactEntry: Record<string, unknown> = {

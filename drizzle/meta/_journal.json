@@ -78,6 +78,13 @@
       "when": 1789598595759,
       "tag": "0010_mature_power_man",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789603094836,
+      "tag": "0011_rapid_ezekiel_stane",
+      "breakpoints": true
     }
   ]
 }

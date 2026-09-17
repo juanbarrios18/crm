@@ -76,6 +76,12 @@ export type WebhookMessage = {
   sticker?: WebhookMediaPayload;
   location?: WebhookLocation;
   contacts?: unknown[];
+  /**
+   * Objeto `referral` de Meta (anuncio de clic a WhatsApp). Es payload externo
+   * sin forma garantizada: se transporta sin validar y se interpreta aparte con
+   * `parseReferral`, de modo que este módulo se mantiene puro.
+   */
+  referral?: unknown;
 };
 
 export type WebhookStatus = {

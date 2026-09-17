@@ -20,6 +20,8 @@ const schema = z
     text: z.string().optional(),
     waMessageId: z.string().optional(),
     timestamp: z.number().optional(),
+    /** Atribución de anuncio de clic a WhatsApp, para el fixture del self-test. */
+    referral: z.record(z.unknown()).optional(),
     // 008 — adjuntos simulados
     mediaId: z.string().optional(),
     mimeType: z.string().optional(),
