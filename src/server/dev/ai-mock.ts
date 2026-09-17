@@ -14,9 +14,16 @@ export function aiMockCompletion(messages: InMessage[]): string {
   const lastUser =
     [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 
-  // Juez del Laboratorio: veredicto determinista por persona. Para cerrar el
-  // loop del self-test, la persona fuera_de_kb pasa a verde si el CONOCIMIENTO
-  // configurado ya cubre garantías/devoluciones (sugerencia aplicada).
+  // Juez del Laboratorio: hallazgos deterministas por persona (P10: el juez ya
+  // NO elige veredicto; el pipeline lo deriva del TIPO de hallazgo). Para cerrar
+  // el loop del self-test, la persona fuera_de_kb deja de tener hallazgos si el
+  // CONOCIMIENTO configurado ya cubre garantías/devoluciones (sugerencia
+  // aplicada).
+  //
+  // `fuera_de_kb` deriva AMARILLO, no rojo: la tabla de severidad aprobada lo
+  // clasifica como mejorable. El mock no lo "sube" a rojo a propósito — la
+  // persona pregunta por algo que el conocimiento no cubre, y ese es el tipo
+  // correcto.
   if (system.includes(JUDGE_MARKER)) {
     const kbSection =
       lastUser
@@ -25,7 +32,6 @@ export function aiMockCompletion(messages: InMessage[]): string {
     const kbCoversWarranty = /garant|devoluc/i.test(kbSection);
     if (lastUser.includes("fuera_de_kb") && !kbCoversWarranty) {
       return JSON.stringify({
-        veredicto: "rojo",
         hallazgos: [
           {
             tipo: "fuera_de_kb",
@@ -40,7 +46,7 @@ export function aiMockCompletion(messages: InMessage[]): string {
         ],
       });
     }
-    return JSON.stringify({ veredicto: "verde", hallazgos: [] });
+    return JSON.stringify({ hallazgos: [] });
   }
 
   const text = lastUser.toLowerCase();

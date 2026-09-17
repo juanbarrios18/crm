@@ -305,3 +305,57 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
   en la corrida de F10. Acá queda establecido el orden; el efecto se mide.
 - Gate: typecheck OK · lint OK · build OK · test OK (344 tests, +1).
 - **Pendientes**: ninguno.
+
+---
+
+## F7 — P10 · Veredicto derivado en código (B2 aprobada)
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambios**:
+  - `judge.ts`: el esquema del juez pasa a `JudgeResponse = { hallazgos }` y se
+    elimina el campo `veredicto`. Nuevo `deriveVerdict(hallazgos)` puro y
+    exportado, con la tabla de B2 en un `Record` **total** sobre el enum de tipos
+    de hallazgo: agregar un tipo nuevo sin clasificarlo no compila.
+  - `JudgeOutcome` ahora expone `veredicto` (derivado) y `hallazgos` (del LLM).
+  - `prompts.ts`: del prompt del juez sale el esquema con `veredicto` y la
+    explicación verde/amarillo/rojo; entra la instrucción de no elegir veredicto.
+  - `runner.ts`: consume `outcome.veredicto` / `outcome.hallazgos`.
+  - `dev/ai-mock.ts`: el fixture del juez deja de devolver `veredicto`.
+  - `computeScore` y `computeDispersion`: se documenta la nueva semántica. Su
+    aritmética no cambia (siguen operando sobre el string del veredicto).
+- **Decisiones**:
+  - **La tabla es un `Record` total**: un tipo de hallazgo sin severidad asignada
+    rompe la compilación. Es la garantía de que la tabla no se desactualiza en
+    silencio, que es exactamente lo que pasó con el veredicto elegido por el
+    modelo.
+  - **Un tipo desconocido degrada hacia arriba, nunca a verde**: el verde exige
+    lista vacía, así que un hallazgo no clasificado no puede producir verde.
+  - **Los chequeos deterministas siguen endureciendo**: `applyPipelineCheck` y
+    `applyDialectCheck` parten del veredicto derivado y solo pueden subirlo,
+    nunca bajarlo. La composición queda: derivar → endurecer.
+- **Evidencia**:
+  - `tests/unit/judge.test.ts` (36 tests, +10): la tabla completa, que
+    `alucinacion` nunca da verde ni sola ni acompañada, que el rojo gana sobre el
+    amarillo sin importar el orden, el determinismo, el tipo desconocido, que
+    `judgeCase` deriva lo que devuelve el juez, y que el prompt ya no pide
+    veredicto.
+  - Gate: typecheck OK · lint OK · build OK · test OK (357 tests, +13).
+- **Aviso obligatorio (va también en la PR)**: **el score deja de ser comparable
+  contra corridas anteriores a esta fase.** La aritmética de `computeScore` no
+  cambió, pero el valor de un mismo caso sí puede cambiar: un caso con hallazgo
+  `fuera_de_kb` que antes el juez podía declarar rojo ahora deriva amarillo. La
+  comparación de F10 es por HALLAZGOS y métricas operativas, no por score.
+- **Límite honesto**: los hallazgos siguen viniendo de un LLM. P10 elimina UNA
+  fuente de inestabilidad (la elección libre del veredicto) pero no la de fondo:
+  una misma conversación puede producir hallazgos distintos entre corridas, y
+  `computeDispersion` sigue siendo la señal de cuánto.
+- **Hallazgo de documentación (pre-existente, no introducido acá)**:
+  `tests/e2e/us4-lab.md` afirmaba "progreso (n/6)" y "5 verdes + 1 rojo ≈ 83" con
+  un corpus que hoy es de **13 personas × 3 repeticiones = 39 casos**, y esperaba
+  score 100 tras cerrar el loop del KB. Con el fixture del ai-mock, además, las
+  personas con `expectAdvance` cuyo guion no dispara la señal de compra del mock
+  reciben un hallazgo `pipeline`. Se reescribió el guion para verificar
+  COMPORTAMIENTO y no cifras: un número escrito en una guía envejece en silencio,
+  que es justo lo que había pasado.
+- **Pendientes**: ninguno.

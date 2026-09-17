@@ -257,17 +257,19 @@ async function runOneCase(
 
   // Verificación determinista del pipeline (FR-030): si la persona debía
   // avanzar de etapa y el lead no se movió, es un defecto del flujo.
-  let veredicto = outcome.status === "done" ? outcome.verdict.veredicto : null;
+  // El veredicto llega DERIVADO de los hallazgos (P10) y de acá en adelante los
+  // chequeos deterministas solo pueden endurecerlo.
+  let veredicto = outcome.status === "done" ? outcome.veredicto : null;
   let hallazgos: unknown[] | null =
-    outcome.status === "done" ? [...outcome.verdict.hallazgos] : null;
+    outcome.status === "done" ? [...outcome.hallazgos] : null;
   if (outcome.status === "done") {
     const checked = applyPipelineCheck({
       expectAdvance: persona.expectAdvance ?? false,
       advanced,
       initialStage,
       finalStage,
-      veredicto: outcome.verdict.veredicto,
-      hallazgos: outcome.verdict.hallazgos,
+      veredicto: outcome.veredicto,
+      hallazgos: outcome.hallazgos,
     });
     // Segundo, el dialecto: si el agente usó voseo rioplatense, endurece
     // cualquier veredicto previo a rojo.

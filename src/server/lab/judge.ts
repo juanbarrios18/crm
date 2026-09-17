@@ -2,32 +2,89 @@ import { z } from "zod";
 import { chatJson } from "@/lib/ai";
 import { buildJudgePrompt } from "@/server/ai/prompts";
 
-/** Veredicto estructurado del juez (FR-032, contrato ai.md). */
-export const Verdict = z.object({
-  veredicto: z.enum(["verde", "amarillo", "rojo"]),
-  hallazgos: z.array(
-    z.object({
-      tipo: z.enum([
-        "alucinacion",
-        "fuera_de_kb",
-        "debio_escalar",
-        "tono",
-        "afirmacion_sin_evidencia",
-      ]),
-      evidencia: z.string(),
-      sugerencia: z
-        .object({ pregunta: z.string(), respuesta: z.string() })
-        .optional(),
-    })
-  ),
+/**
+ * Hallazgo del juez (FR-032, contrato ai.md).
+ *
+ * P10: el juez YA NO elige el veredicto. Devuelve SOLO hallazgos y el veredicto
+ * se deriva en código con una tabla fija (`deriveVerdict`). Antes el mismo
+ * modelo podía declarar "verde" teniendo un hallazgo grave — el instrumento se
+ * contradecía a sí mismo y hacía incomparables las corridas.
+ */
+export const Hallazgo = z.object({
+  tipo: z.enum([
+    "alucinacion",
+    "fuera_de_kb",
+    "debio_escalar",
+    "tono",
+    "afirmacion_sin_evidencia",
+  ]),
+  evidencia: z.string(),
+  sugerencia: z
+    .object({ pregunta: z.string(), respuesta: z.string() })
+    .optional(),
 });
 
-export type VerdictType = z.infer<typeof Verdict>;
+export type Hallazgo = z.infer<typeof Hallazgo>;
+
+/** Lo que el juez devuelve: hallazgos, nada más. */
+export const JudgeResponse = z.object({
+  hallazgos: z.array(Hallazgo),
+});
+
+export type JudgeResponseType = z.infer<typeof JudgeResponse>;
+
+export type LabVerdict = "verde" | "amarillo" | "rojo";
+
+/**
+ * Tabla de severidad de B2 (aprobada por el dueño el 2026-09-17).
+ *
+ * Es un `Record` TOTAL sobre los tipos de hallazgo del juez: agregar un tipo
+ * nuevo al enum sin clasificarlo acá no compila. Esa es la garantía de que la
+ * tabla no se queda desactualizada en silencio.
+ *
+ * `verde` no aparece a propósito: no es la severidad de un hallazgo, es la
+ * ausencia de hallazgos.
+ */
+const SEVERIDAD: Record<Hallazgo["tipo"], LabVerdict> = {
+  alucinacion: "rojo",
+  afirmacion_sin_evidencia: "rojo",
+  debio_escalar: "rojo",
+  fuera_de_kb: "amarillo",
+  tono: "amarillo",
+};
+
+/**
+ * Deriva el veredicto de los hallazgos del juez (P10).
+ *
+ *   - sin hallazgos → verde
+ *   - algún hallazgo grave → rojo
+ *   - cualquier otro caso → amarillo
+ *
+ * Pura y determinista: los HALLAZGOS siguen viniendo de un LLM y pueden variar
+ * entre corridas, pero un mismo conjunto de hallazgos da siempre el mismo
+ * veredicto. Un hallazgo `alucinacion` NUNCA puede dar verde, por construcción.
+ *
+ * Un tipo desconocido no puede producir verde (verde exige lista vacía), así que
+ * un hallazgo no clasificado degrada hacia arriba, nunca hacia abajo.
+ *
+ * Los chequeos deterministas posteriores (`applyPipelineCheck`, `applyDialectCheck`)
+ * parten de este veredicto y solo pueden ENDURECERLO, nunca ablandarlo.
+ */
+export function deriveVerdict(
+  hallazgos: readonly { tipo: Hallazgo["tipo"] }[]
+): LabVerdict {
+  if (hallazgos.length === 0) return "verde";
+  return hallazgos.some((h) => SEVERIDAD[h.tipo] === "rojo")
+    ? "rojo"
+    : "amarillo";
+}
 
 export type JudgeOutcome =
   | {
       status: "done";
-      verdict: VerdictType;
+      /** Veredicto DERIVADO de los hallazgos, no elegido por el modelo. */
+      veredicto: LabVerdict;
+      hallazgos: Hallazgo[];
       /** Modelo y latencia del juez (Laboratorio). */
       model: string;
       latencyMs: number;
@@ -107,7 +164,7 @@ export async function judgeCase(input: {
       zonesText: input.zonesText,
     });
     return chatJson(
-      Verdict,
+      JudgeResponse,
       [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -120,7 +177,8 @@ export async function judgeCase(input: {
   if (first.ok) {
     return {
       status: "done",
-      verdict: first.data,
+      veredicto: deriveVerdict(first.data.hallazgos),
+      hallazgos: first.data.hallazgos,
       model: first.model,
       latencyMs: first.latencyMs,
     };
@@ -131,7 +189,8 @@ export async function judgeCase(input: {
   if (second.ok) {
     return {
       status: "done",
-      verdict: second.data,
+      veredicto: deriveVerdict(second.data.hallazgos),
+      hallazgos: second.data.hallazgos,
       model: second.model,
       latencyMs: second.latencyMs,
     };
@@ -168,6 +227,12 @@ function medianOf(puntos: number[]): number {
  *
  * Compatibilidad: con una sola repetición por persona la mediana es ese valor,
  * así que el score de las corridas anteriores (un caso por persona) no cambia.
+ *
+ * OJO (P10): el veredicto ya no lo elige el juez sino que se DERIVA del tipo de
+ * hallazgo (`deriveVerdict`). La aritmética de acá no cambió, pero el VALOR de
+ * un mismo caso puede cambiar: un caso con hallazgo `fuera_de_kb` que antes el
+ * juez podía declarar rojo ahora es amarillo. Por eso el score NO es comparable
+ * contra corridas anteriores a P10.
  */
 export function computeScore(
   cases: { persona: string; status: string; veredicto: string | null }[]
@@ -197,6 +262,11 @@ export function computeScore(
  * instrumento es del mismo orden que la señal, así que una diferencia de score
  * puede ser variación del modelo y no efecto de una edición. `inestables` es
  * cuántas personas quedaron en esa situación.
+ *
+ * P10 reduce una fuente de inestabilidad —la elección del veredicto ya no es
+ * una decisión libre del juez, sino una derivación determinista del tipo de
+ * hallazgo— pero NO la elimina: los hallazgos siguen viniendo de un LLM, así que
+ * una misma conversación puede producir hallazgos distintos entre corridas.
  */
 export function computeDispersion(
   cases: {
