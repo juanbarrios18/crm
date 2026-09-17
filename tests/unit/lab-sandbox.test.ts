@@ -12,15 +12,16 @@ vi.mock("@/lib/meta/client", async (importOriginal) => {
   return { ...original, graphRequest };
 });
 
+// El turno hace DOS llamadas (conversación y anotación): el mock devuelve una
+// secuencia con su propio timing, y el pipeline lo suma.
+const aiResults: unknown[] = [];
+let aiCall = 0;
+
 vi.mock("@/lib/ai", () => ({
-  chatJson: vi.fn().mockResolvedValue({
-    ok: true,
-    data: { action: "reply", text: "respuesta simulada" },
-    raw: "{}",
-    model: "modelo-test",
-    latencyMs: 250,
-    usage: { promptTokens: 2100, completionTokens: 80, cachedTokens: 1900 },
-    provider: "DeepInfra",
+  chatJson: vi.fn(() => {
+    const result = aiResults[Math.min(aiCall, aiResults.length - 1)];
+    aiCall++;
+    return Promise.resolve(result);
   }),
 }));
 
@@ -84,10 +85,32 @@ describe("sandbox del Laboratorio en el pipeline del agente", () => {
     graphRequest.mockReset();
     selectQueue.length = 0;
     inserts.length = 0;
+    aiResults.length = 0;
+    aiCall = 0;
     vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
   });
 
   it("turno sobre conversación is_test → persiste la respuesta y NO llama a Graph", async () => {
+    aiResults.push(
+      {
+        ok: true,
+        data: { reply: "respuesta simulada" },
+        raw: "{}",
+        model: "modelo-test",
+        latencyMs: 250,
+        usage: { promptTokens: 2100, completionTokens: 80, cachedTokens: 1900 },
+        provider: "DeepInfra",
+      },
+      {
+        ok: true,
+        data: {},
+        raw: "{}",
+        model: "modelo-test",
+        latencyMs: 50,
+        usage: { promptTokens: 200, completionTokens: 10, cachedTokens: 100 },
+        provider: "DeepInfra",
+      }
+    );
     const testConversation = {
       id: "cv_lab",
       organizationId: "org_1",
@@ -117,13 +140,14 @@ describe("sandbox del Laboratorio en el pipeline del agente", () => {
     const timing = await runAgentTurn("cv_lab");
 
     expect(graphRequest).not.toHaveBeenCalled();
-    // expone el modelo, latencia, tokens y provider del turno (telemetría)
+    // expone la telemetría SUMADA de las dos llamadas del turno (conversación +
+    // anotación): latencia y tokens son la suma real, no los de una sola.
     expect(timing).toEqual({
       model: "modelo-test",
-      latencyMs: 250,
-      promptTokens: 2100,
-      completionTokens: 80,
-      cachedTokens: 1900,
+      latencyMs: 300,
+      promptTokens: 2300,
+      completionTokens: 90,
+      cachedTokens: 2000,
       provider: "DeepInfra",
     });
     // la respuesta quedó persistida como mensaje saliente ai_generated

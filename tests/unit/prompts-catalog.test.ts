@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentSystemPrompt,
+  buildAnnotationSystemPrompt,
   renderCatalog,
   renderDeliveryZones,
 } from "@/server/ai/prompts";
@@ -125,15 +126,56 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("no recibió algo");
   });
 
-  it("instruye a mover de etapa con el campo stage y nombres EXACTOS", () => {
+  it("inyecta las etapas como CONTEXTO, no como contrato de salida del CRM", () => {
     const prompt = build();
     for (const stage of STAGES) {
       expect(prompt).toContain(stage.name);
     }
-    expect(prompt).toContain('"stage"');
     expect(prompt).toContain("Etapa actual del lead");
-    expect(prompt.toLowerCase()).toContain("nombre exacto");
+    // El contrato de conversación solo produce texto para el cliente: los campos
+    // del CRM (stage/empresa/comuna/rut) viven en el prompt de anotación.
+    expect(prompt).toContain('"reply"');
+    expect(prompt).not.toContain('"stage"');
+    expect(prompt.toLowerCase()).not.toContain("nombre exacto");
+    // Lo que no puede viajar es el CONTRATO de salida del CRM (las acciones y las
+    // claves del esquema), no las palabras del dominio: "comuna" es legítima en
+    // las reglas de conversación, porque es el dato que acota la cotización.
+    expect(prompt).not.toContain("update_lead");
+    expect(prompt).not.toContain("move_stage");
+    expect(prompt).not.toContain('"empresa"');
+    expect(prompt).not.toContain('"comuna"');
+    expect(prompt).not.toContain('"rut"');
     // Regresión: el prompt no debe hardcodear una etapa fuera de la lista.
     expect(prompt).not.toContain("interesados");
+  });
+});
+
+describe("buildAnnotationSystemPrompt", () => {
+  it("describe la extracción con las etapas y la etapa actual", () => {
+    const prompt = buildAnnotationSystemPrompt({
+      profile: PROFILE,
+      stages: STAGES,
+      currentStage: "Calificado",
+    });
+    expect(prompt).toContain("Calificado");
+    for (const stage of STAGES) {
+      expect(prompt).toContain(stage.name);
+    }
+    expect(prompt).toContain("nombre EXACTO");
+    expect(prompt.toLowerCase()).toContain("extraiga");
+  });
+
+  it("no incluye catálogo, zonas ni voz de marca (recorte deliberado)", () => {
+    const prompt = buildAnnotationSystemPrompt({
+      profile: PROFILE,
+      stages: STAGES,
+      currentStage: null,
+    });
+    expect(prompt).not.toContain("CATÁLOGO DE PRODUCTOS");
+    expect(prompt).not.toContain("Pan de hamburguesa");
+    expect(prompt).not.toContain("ZONAS DE ENVÍO");
+    expect(prompt).not.toContain("Macul");
+    expect(prompt).not.toContain("Tono:");
+    expect(prompt).not.toContain("Saludo sugerido");
   });
 });
