@@ -2,7 +2,6 @@ import { asc } from "drizzle-orm";
 import { apiError, withAuth } from "@/lib/api";
 import { getDb, schema } from "@/lib/db";
 import { scoped } from "@/lib/db/tenant";
-import { getEnv } from "@/lib/env";
 import {
   buildAgentSystemPrompt,
   NIVEL_1_VERDAD_DEL_SISTEMA,
@@ -26,7 +25,10 @@ export const dynamic = "force-dynamic";
 const CLIENT_FILE_NOTE =
   "Vista previa del prompt base: incluye la configuración, el conocimiento, el " +
   "catálogo y las etapas de esta instancia. No incluye la ficha de un cliente " +
-  "concreto ni el historial de la conversación, que se agregan en cada turno.";
+  "concreto ni el historial de la conversación, que se agregan en cada turno. " +
+  "La fecha y hora del turno tampoco viajan en este prompt: se adjuntan en cada " +
+  "turno al último mensaje del cliente, para mantener estable el prefijo que el " +
+  "proveedor puede cachear.";
 
 export const GET = withAuth(async (session) => {
   const db = getDb();
@@ -68,10 +70,6 @@ export const GET = withAuth(async (session) => {
     currentStage: null,
     catalog,
     zones,
-    // El panel muestra el prompt EFECTIVO: la zona horaria es configuración de
-    // la instancia, así que la vista previa debe usar la misma que el turno.
-    now: new Date(),
-    timeZone: getEnv().BUSINESS_TIMEZONE,
   });
 
   return Response.json({

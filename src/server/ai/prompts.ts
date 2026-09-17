@@ -23,6 +23,7 @@
  *   perfil; nunca puede contradecir N1 ni N2.
  */
 
+import type { ChatMessage } from "@/lib/ai";
 import type { schema } from "@/lib/db";
 import type { PublicProduct } from "@/lib/catalog";
 import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
@@ -245,9 +246,12 @@ export function renderClientFile(
 }
 
 /**
- * Línea de contexto temporal (P6). Va al FINAL del prompt, después de todo lo
- * estable: es lo único que cambia en cada turno, así que ponerla al final deja
- * el prefijo cacheable intacto.
+ * Texto base del contexto temporal (única fuente de la línea de fecha/hora).
+ *
+ * NO va dentro del system prompt: el pipeline lo envuelve con
+ * `renderTemporalNote` y lo adjunta al último mensaje del cliente en cada turno.
+ * Un system que cambia minuto a minuto anula la caché de prefijo del proveedor
+ * (la medición está en el comentario de `buildAgentSystemPrompt`).
  *
  * La zona horaria es un dato del negocio (`BUSINESS_TIMEZONE`); el formateo sale
  * de Intl, así que respeta el horario de verano de la zona.
@@ -262,6 +266,48 @@ export function renderTemporalContext(now: Date, timeZone: string): string {
     `Fecha y hora actuales: ${formatted} (zona ${timeZone}). ` +
     "Úselas para razonar sobre plazos y días de atención; no las repita salvo que el cliente pregunte por fechas."
   );
+}
+
+/**
+ * Marcador de NOTA INTERNA del sistema que precede al contexto temporal.
+ *
+ * La nota viaja pegada al último mensaje del cliente para no romper el prefijo
+ * cacheable, pero su contenido es del sistema. Sin el marcador, el modelo puede
+ * leerla como si el cliente hubiera escrito la fecha y la hora.
+ */
+export const TEMPORAL_NOTE_MARK =
+  "[CONTEXTO INTERNO DEL SISTEMA — no es un mensaje del cliente]";
+
+/**
+ * Envuelve el contexto temporal con el marcador de nota interna. Es el texto
+ * que el pipeline adjunta al último mensaje del cliente (ver
+ * `appendTemporalNote`).
+ */
+export function renderTemporalNote(now: Date, timeZone: string): string {
+  return `${TEMPORAL_NOTE_MARK} ${renderTemporalContext(now, timeZone)}`;
+}
+
+/**
+ * Adjunta la nota temporal al FINAL del último mensaje del cliente, separada
+ * por una línea en blanco. Devuelve un arreglo NUEVO y no muta el de entrada.
+ *
+ * Si el último mensaje no es del cliente (caso borde: historial que termina en
+ * una respuesta del agente), agrega la nota como mensaje `user` nuevo en vez de
+ * romper. El system nunca recibe la nota: ese es el invariante de caché (ver la
+ * tabla medida en `buildAgentSystemPrompt`).
+ */
+export function appendTemporalNote(
+  messages: readonly ChatMessage[],
+  note: string
+): ChatMessage[] {
+  const last = messages[messages.length - 1];
+  if (last && last.role === "user") {
+    return [
+      ...messages.slice(0, -1),
+      { role: "user", content: `${last.content}\n\n${note}` },
+    ];
+  }
+  return [...messages, { role: "user", content: note }];
 }
 
 /**
@@ -372,17 +418,36 @@ const FORMATO_DE_MENSAJES: readonly string[] = [
  * System prompt del agente (v1: inyecta el KB completo — el límite se
  * documenta con el contador de tamaño en la UI).
  *
- * ORDEN ESTABLE→DINÁMICO (P4a). El prompt se arma en dos tramos:
+ * ORDEN ESTABLE→DINÁMICO (P4a, revisado en P1). El prompt se arma en dos tramos:
  *
  *   1. PREFIJO ESTABLE (cacheable): identidad → tono → instrucciones →
  *      escalado → saludo → conocimiento → catálogo → zonas → etapas →
  *      reglas fijas (contrato → N1 → N2 → cierre → formato).
- *   2. COLA DINÁMICA (cambia por turno): etapa actual → ficha del cliente →
- *      fecha y hora.
+ *   2. COLA DINÁMICA (cambia por turno): etapa actual → ficha del cliente.
  *
- * No reordenar esto sin medir: el proveedor cachea por PREFIJO, así que meter
- * algo que cambia por turno dentro del tramo 1 hace que todo lo que sigue deje
- * de coincidir y se pierda la caché. Lo que cambia va SIEMPRE al final.
+ * EL SYSTEM PROMPT NO LLEVA FECHA NI HORA (P1). Es un invariante de caché
+ * medido, no una preferencia de estilo: el proveedor solo acredita caché si el
+ * mensaje `system` es idéntico byte a byte entre turnos, así que cualquier dato
+ * que cambie minuto a minuto dentro del system anula el acierto de TODO lo que
+ * sigue. Una sonda contra el proveedor real (`google/gemini-2.5-flash-lite` vía
+ * OpenRouter, mismo prefijo y mismas preguntas, 5 turnos × 2 pasadas) midió:
+ *
+ *   | Forma de los mensajes                                  | Caché observada |
+ *   |--------------------------------------------------------|-----------------|
+ *   | A: temporal DENTRO del system (forma anterior)         | 0 % en los 5    |
+ *   | B: system final DESPUÉS del historial                  | 0 % en los 5    |
+ *   | C: temporal adjunta al último mensaje del cliente      | 81-82 % desde el turno 3 |
+ *   | G: temporal como mensaje `user` aparte al final        | 80-82 %         |
+ *   | H: sin temporal (techo medido)                         | 82-85 %         |
+ *
+ * Por eso la línea temporal se renderiza con `renderTemporalNote` y el pipeline
+ * la adjunta al ÚLTIMO mensaje del cliente con `appendTemporalNote`: mantiene la
+ * precisión al minuto sin tocar el prefijo. La variante B (system final) NO
+ * sirve: este proveedor no acredita caché si el system no es el primero.
+ *
+ * No reordenar sin medir: meter algo que cambia por turno dentro del tramo 1
+ * hace que todo lo que sigue deje de coincidir y se pierda la caché. Lo que
+ * cambia va SIEMPRE al final.
  *
  * Las etapas llegan como CONTEXTO: sirven para conversar con el estado del lead
  * a la vista. El contrato de SALIDA de este prompt NO incluye campos del CRM —
@@ -396,10 +461,6 @@ export function buildAgentSystemPrompt(input: {
   catalog?: PublicProduct[];
   zones?: { comuna: string; costoDespacho: number | null }[];
   clientFile?: ClientFile | null;
-  /** Momento del turno; explícito para poder probar la línea temporal. */
-  now?: Date;
-  /** Zona horaria IANA del negocio (`BUSINESS_TIMEZONE`). */
-  timeZone?: string;
 }): string {
   const { profile } = input;
   const clientFileBlock = renderClientFile(input.clientFile);
@@ -440,8 +501,6 @@ export function buildAgentSystemPrompt(input: {
     reglasFijas,
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
     clientFileBlock,
-    // P6 — lo único que cambia minuto a minuto, al final del todo.
-    renderTemporalContext(input.now ?? new Date(), input.timeZone ?? "America/Santiago"),
   ]
     .filter(Boolean)
     .join("\n\n");

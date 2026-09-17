@@ -32,20 +32,11 @@ const PROFILE = {
 
 const STAGES = [{ name: "Nuevo" }, { name: "Calificado" }, { name: "Ganado" }];
 
-/**
- * Momento fijo: el prompt incluye una línea con la fecha y hora del turno, así
- * que un `new Date()` real haría que dos builds del mismo caso difieran si el
- * reloj cruza el minuto entre uno y otro.
- */
-const FIXED_NOW = new Date("2026-09-17T15:30:00Z");
-
 function build(input: Partial<Parameters<typeof buildAgentSystemPrompt>[0]> = {}) {
   return buildAgentSystemPrompt({
     profile: PROFILE,
     kb: [],
     stages: STAGES,
-    now: FIXED_NOW,
-    timeZone: "America/Santiago",
     ...input,
   });
 }
@@ -194,23 +185,19 @@ describe("buildAgentSystemPrompt con ficha del cliente", () => {
       "Etapas del pipeline",
       "En cada turno responde ÚNICAMENTE", // bloque fijo de reglas
     ];
-    const dinamico = [
-      "Etapa actual del lead:",
-      CLIENT_FILE_HEADER,
-      "Fecha y hora actuales:",
-    ];
+    const dinamico = ["Etapa actual del lead:", CLIENT_FILE_HEADER];
 
     const lastEstable = Math.max(...estable.map((s) => prompt.indexOf(s)));
     const firstDinamico = Math.min(...dinamico.map((s) => prompt.indexOf(s)));
     expect(lastEstable).toBeGreaterThanOrEqual(0);
     expect(lastEstable).toBeLessThan(firstDinamico);
 
-    // Y dentro de la cola dinámica se conserva el orden.
+    // Y dentro de la cola dinámica se conserva el orden: la ficha cierra el
+    // prompt (P1: la línea temporal ya no vive acá).
     const etapaAt = prompt.indexOf("Etapa actual del lead:");
     const fichaAt = prompt.indexOf(CLIENT_FILE_HEADER);
-    const fechaAt = prompt.indexOf("Fecha y hora actuales:");
     expect(etapaAt).toBeLessThan(fichaAt);
-    expect(fichaAt).toBeLessThan(fechaAt);
+    expect(prompt).not.toContain("Fecha y hora actuales:");
   });
 
   it("el bloque de reglas fijas queda ANTES de la etapa actual y de la ficha (P4a)", () => {
@@ -282,10 +269,10 @@ describe("buildAgentSystemPrompt con notas extensas (P6)", () => {
       profile: { ...PROFILE, instructions: "x" },
       clientFile: { name: "Ana", notes },
     });
-    // La ficha va del encabezado hasta la línea temporal, que cierra el prompt.
+    // La ficha cierra el prompt (P1: la línea temporal ya no viaja en el system),
+    // así que el bloque va desde su encabezado hasta el final.
     const start = prompt.indexOf(CLIENT_FILE_HEADER);
-    const end = prompt.indexOf("Fecha y hora actuales:");
-    const block = prompt.slice(start, end);
+    const block = prompt.slice(start);
     expect(block).toContain(NOTES_TRUNCATED_MARK);
     expect(block).toContain("nota numero 30:");
     expect(block).not.toContain("nota numero 1:");

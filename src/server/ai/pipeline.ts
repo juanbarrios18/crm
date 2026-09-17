@@ -17,9 +17,11 @@ import { matchesHandoffIntent } from "@/server/ai/handoff";
 import { toConversationHistory } from "@/server/ai/history";
 import {
   ANNOTATION_HISTORY_LIMIT,
+  appendTemporalNote,
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
   CLOSING_FAREWELL,
+  renderTemporalNote,
 } from "@/server/ai/prompts";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { notifyHandoff } from "@/server/push/notify";
@@ -277,23 +279,36 @@ export async function runAgentTurn(
   const catalog = await getActiveProductsPublic(organizationId);
   const zones = await getActiveZones(organizationId);
 
-  const messages: ChatMessage[] = [
-    {
-      role: "system",
-      content: buildAgentSystemPrompt({
-        profile,
-        kb,
-        stages,
-        currentStage: currentStage?.name ?? null,
-        catalog,
-        zones,
-        clientFile,
-        now: new Date(),
-        timeZone: getEnv().BUSINESS_TIMEZONE,
-      }),
-    },
-    ...toConversationHistory(history),
-  ];
+  // P1 — la nota de fecha/hora NO viaja en el system. El proveedor solo acredita
+  // caché si el system es idéntico byte a byte entre turnos: la sonda medida (5
+  // turnos × 2 pasadas, `google/gemini-2.5-flash-lite` vía OpenRouter) da 0 % de
+  // caché con la línea dentro del system y 81-82 % desde el turno 3 con la nota
+  // adjunta al último mensaje del cliente. La tabla completa está en el comentario
+  // de `buildAgentSystemPrompt`. En el caso normal la nota va pegada al último
+  // mensaje del cliente (no en uno nuevo aparte) para no alterar la forma del
+  // historial; el caso borde está documentado en `appendTemporalNote`.
+  const temporalNote = renderTemporalNote(
+    new Date(),
+    getEnv().BUSINESS_TIMEZONE
+  );
+  const messages: ChatMessage[] = appendTemporalNote(
+    [
+      {
+        role: "system",
+        content: buildAgentSystemPrompt({
+          profile,
+          kb,
+          stages,
+          currentStage: currentStage?.name ?? null,
+          catalog,
+          zones,
+          clientFile,
+        }),
+      },
+      ...toConversationHistory(history),
+    ],
+    temporalNote
+  );
 
   // Mensajes de la anotación (llamada 2). Su ENTRADA no depende del reply de la
   // conversación: solo del system de extracción y del historial. Por eso se arma

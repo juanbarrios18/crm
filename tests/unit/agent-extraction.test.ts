@@ -336,9 +336,15 @@ describe("pipeline: llamada de anotación separada de la conversación", () => {
       [unknown, { role: string; content: string }[]],
       [unknown, { role: string; content: string }[]],
     ];
-    // Conversación: system + los 12 mensajes.
-    expect(conversationCall[1]).toHaveLength(13);
-    // Anotación: system + los 6 últimos.
+    // Conversación: system + los 12 mensajes + la nota temporal. El fixture
+    // termina en un saliente del agente (el mensaje 11 es "out"), así que la
+    // nota entra como mensaje `user` NUEVO: es el caso borde de
+    // `appendTemporalNote` (P1).
+    expect(conversationCall[1]).toHaveLength(14);
+    const noteMessage = conversationCall[1].at(-1)!;
+    expect(noteMessage.role).toBe("user");
+    expect(noteMessage.content).toContain("CONTEXTO INTERNO DEL SISTEMA");
+    // Anotación: system + los 6 últimos, sin la nota (la extracción no la lleva).
     expect(annotationCall[1]).toHaveLength(7);
     expect(annotationCall[1][1]!.content).toBe("mensaje 6");
     expect(annotationCall[1].at(-1)!.content).toBe("mensaje 11");

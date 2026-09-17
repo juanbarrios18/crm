@@ -231,13 +231,14 @@ describe("GET /api/agent/prompt", () => {
     const reglasAt = prompt.indexOf("En cada turno responde ÚNICAMENTE");
     const etapasAt = prompt.indexOf("Etapas del pipeline");
     const etapaActualAt = prompt.indexOf("Etapa actual del lead:");
-    const fechaAt = prompt.indexOf("Fecha y hora actuales:");
 
     expect(etapasAt).toBeGreaterThan(0);
     expect(reglasAt).toBeGreaterThan(etapasAt);
     expect(etapaActualAt).toBeGreaterThan(reglasAt);
-    expect(fechaAt).toBeGreaterThan(etapaActualAt);
-    // La línea temporal cierra el prompt: es la última sección.
-    expect(fechaAt).toBe(prompt.lastIndexOf("\n\n") + 2);
+    // P1: la línea temporal ya no vive en el system. El panel muestra el prompt
+    // base, sin la nota de fecha/hora que el pipeline adjunta al último mensaje
+    // del cliente en cada turno.
+    expect(prompt).not.toContain("Fecha y hora actuales:");
+    expect(prompt).not.toContain("CONTEXTO INTERNO DEL SISTEMA");
   });
 });

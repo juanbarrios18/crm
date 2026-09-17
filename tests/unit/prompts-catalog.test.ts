@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
+import type { ChatMessage } from "@/lib/ai";
 import type { PublicProduct } from "@/lib/catalog";
 import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 import {
+  appendTemporalNote,
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
   renderCatalogVocabulary,
   renderCatalog,
   renderDeliveryZones,
+  renderTemporalContext,
+  renderTemporalNote,
 } from "@/server/ai/prompts";
 
 /**
@@ -83,9 +87,10 @@ const CATALOGO_REAL: PublicProduct[] = [
 ];
 
 /**
- * Momento fijo: el prompt incluye una línea con la fecha y hora del turno, así
- * que un `new Date()` real haría que dos builds del mismo caso difieran si el
- * reloj cruza el minuto entre uno y otro.
+ * Momento fijo para las pruebas del contexto temporal: la fecha se formatea con
+ * Intl, así que un instante real haría que dos builds difieran según el reloj.
+ * El system prompt ya NO incluye la fecha (P1): este valor solo alimenta
+ * `renderTemporalNote`.
  */
 const FIXED_NOW = new Date("2026-09-17T15:30:00Z");
 
@@ -96,8 +101,6 @@ function build(input: Partial<Parameters<typeof buildAgentSystemPrompt>[0]> = {}
     stages: STAGES,
     catalog: CATALOG,
     zones: ZONES,
-    now: FIXED_NOW,
-    timeZone: "America/Santiago",
     ...input,
   });
 }
@@ -197,31 +200,29 @@ describe("buildAgentSystemPrompt", () => {
   });
 });
 
-describe("contexto temporal (P6)", () => {
-  it("la línea temporal va AL FINAL del prompt", () => {
+describe("contexto temporal fuera del prefijo cacheable (P1)", () => {
+  it("el system prompt NO contiene la fecha ni la hora (invariante de caché)", () => {
     const prompt = build();
-    const temporalAt = prompt.indexOf("Fecha y hora actuales:");
-    expect(temporalAt).toBeGreaterThan(0);
-    // Nada después de la línea temporal: es lo único que cambia por turno, así
-    // que el prefijo estable queda cacheable.
-    const after = prompt.slice(temporalAt);
-    expect(after).toContain("Fecha y hora actuales:");
-    for (const stable of [
-      "En cada turno responde ÚNICAMENTE",
-      "Etapa actual del lead:",
-      "CONOCIMIENTO DEL NEGOCIO",
-      "CATÁLOGO DE PRODUCTOS",
-    ]) {
-      expect(prompt.indexOf(stable)).toBeLessThan(temporalAt);
-    }
-    // Efectivamente es la última sección.
-    expect(prompt.lastIndexOf("\n\n")).toBeLessThan(temporalAt);
+    expect(prompt).not.toContain("Fecha y hora actuales:");
+    // Dos builds del mismo estado son idénticos byte a byte: ningún dato que
+    // cambie por reloj puede colarse en el prefijo que el proveedor cachea.
+    expect(build()).toBe(build());
+  });
+
+  it("la nota temporal se marca como contexto interno del sistema", () => {
+    const note = renderTemporalNote(FIXED_NOW, "America/Santiago");
+    expect(note).toContain("CONTEXTO INTERNO DEL SISTEMA");
+    expect(note).toContain("no es un mensaje del cliente");
+    // El texto de la nota es exactamente el de la fuente única.
+    expect(note).toContain(
+      renderTemporalContext(FIXED_NOW, "America/Santiago")
+    );
   });
 
   it("formatea la fecha en la zona del negocio", () => {
-    const prompt = build();
-    expect(prompt).toContain("jueves, 17 de septiembre de 2026");
-    expect(prompt).toContain("(zona America/Santiago)");
+    const note = renderTemporalNote(FIXED_NOW, "America/Santiago");
+    expect(note).toContain("jueves, 17 de septiembre de 2026");
+    expect(note).toContain("(zona America/Santiago)");
   });
 
   it("respeta una zona horaria distinta (el día puede cambiar)", () => {
@@ -229,12 +230,56 @@ describe("contexto temporal (P6)", () => {
     // verano chileno) y las 14:00 del 17 en Auckland (UTC+12): el mismo instante
     // cae en días distintos según la zona configurada.
     const instant = new Date("2026-09-17T02:00:00Z");
-    expect(build({ now: instant, timeZone: "America/Santiago" })).toContain(
+    expect(renderTemporalNote(instant, "America/Santiago")).toContain(
       "16 de septiembre de 2026"
     );
-    expect(build({ now: instant, timeZone: "Pacific/Auckland" })).toContain(
+    expect(renderTemporalNote(instant, "Pacific/Auckland")).toContain(
       "17 de septiembre de 2026"
     );
+  });
+});
+
+describe("appendTemporalNote (P1)", () => {
+  const NOTE = renderTemporalNote(FIXED_NOW, "America/Santiago");
+
+  it("adjunta la nota al final del último mensaje del cliente", () => {
+    const messages: ChatMessage[] = [
+      { role: "system", content: "system estable" },
+      { role: "user", content: "hola" },
+      { role: "assistant", content: "¿En qué le ayudo?" },
+      { role: "user", content: "precio del pan" },
+    ];
+    const out = appendTemporalNote(messages, NOTE);
+    const last = out[out.length - 1]!;
+    expect(last.role).toBe("user");
+    expect(last.content).toBe(`precio del pan\n\n${NOTE}`);
+    // El system queda intacto: la nota nunca viaja en el prefijo cacheable.
+    expect(out[0]!.content).toBe("system estable");
+    expect(out[0]!.content).not.toContain("Fecha y hora actuales:");
+  });
+
+  it("no muta el arreglo de entrada", () => {
+    const messages: ChatMessage[] = [{ role: "user", content: "hola" }];
+    const out = appendTemporalNote(messages, NOTE);
+    expect(messages[0]!.content).toBe("hola");
+    expect(out).not.toBe(messages);
+  });
+
+  it("si el último mensaje no es del cliente, agrega uno nuevo (caso borde)", () => {
+    const messages: ChatMessage[] = [
+      { role: "system", content: "system" },
+      { role: "user", content: "hola" },
+      { role: "assistant", content: "respuesta" },
+    ];
+    const out = appendTemporalNote(messages, NOTE);
+    expect(out).toHaveLength(4);
+    expect(out[3]).toEqual({ role: "user", content: NOTE });
+  });
+
+  it("con arreglo vacío agrega un mensaje de contexto", () => {
+    expect(appendTemporalNote([], NOTE)).toEqual([
+      { role: "user", content: NOTE },
+    ]);
   });
 });
 
