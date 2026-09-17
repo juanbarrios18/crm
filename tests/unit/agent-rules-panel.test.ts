@@ -212,4 +212,32 @@ describe("GET /api/agent/prompt", () => {
     expect(json.effectivePrompt).toContain(PROFILE_ROW.name);
     expect(json.clientFileNote.length).toBeGreaterThan(0);
   });
+
+  it("el prompt efectivo respeta el orden estable→dinámico (P4a)", async () => {
+    selectQueue.push(
+      [PROFILE_ROW],
+      [], // knowledge base
+      [{ id: "stg_1", name: "Nuevo", position: 0, kind: "open" }]
+    );
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { effectivePrompt: string };
+    const prompt = json.effectivePrompt;
+
+    // El tramo estable (que el proveedor puede cachear) va antes que todo lo que
+    // cambia por turno. Si el bloque de reglas volviera detrás de la etapa
+    // actual, la caché de prefijo se perdería en cada turno.
+    const reglasAt = prompt.indexOf("En cada turno responde ÚNICAMENTE");
+    const etapasAt = prompt.indexOf("Etapas del pipeline");
+    const etapaActualAt = prompt.indexOf("Etapa actual del lead:");
+    const fechaAt = prompt.indexOf("Fecha y hora actuales:");
+
+    expect(etapasAt).toBeGreaterThan(0);
+    expect(reglasAt).toBeGreaterThan(etapasAt);
+    expect(etapaActualAt).toBeGreaterThan(reglasAt);
+    expect(fechaAt).toBeGreaterThan(etapaActualAt);
+    // La línea temporal cierra el prompt: es la última sección.
+    expect(fechaAt).toBe(prompt.lastIndexOf("\n\n") + 2);
+  });
 });

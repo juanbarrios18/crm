@@ -356,12 +356,21 @@ const FORMATO_DE_MENSAJES: readonly string[] = [
  * System prompt del agente (v1: inyecta el KB completo — el límite se
  * documenta con el contador de tamaño en la UI).
  *
- * Orden estable: identidad y configuración del negocio arriba; el bloque fijo de
- * reglas al final, en el orden CONTRATO_TECNICO → N1 → N2 → cierre → formato.
+ * ORDEN ESTABLE→DINÁMICO (P4a). El prompt se arma en dos tramos:
  *
- * Las etapas y la etapa actual llegan como CONTEXTO (otra fase): sirven para
- * conversar con el estado del lead a la vista. El contrato de SALIDA de este
- * prompt NO incluye campos del CRM — esos viven en `buildAnnotationSystemPrompt`.
+ *   1. PREFIJO ESTABLE (cacheable): identidad → tono → instrucciones →
+ *      escalado → saludo → conocimiento → catálogo → zonas → etapas →
+ *      reglas fijas (contrato → N1 → N2 → cierre → formato).
+ *   2. COLA DINÁMICA (cambia por turno): etapa actual → ficha del cliente →
+ *      fecha y hora.
+ *
+ * No reordenar esto sin medir: el proveedor cachea por PREFIJO, así que meter
+ * algo que cambia por turno dentro del tramo 1 hace que todo lo que sigue deje
+ * de coincidir y se pierda la caché. Lo que cambia va SIEMPRE al final.
+ *
+ * Las etapas llegan como CONTEXTO: sirven para conversar con el estado del lead
+ * a la vista. El contrato de SALIDA de este prompt NO incluye campos del CRM —
+ * esos viven en `buildAnnotationSystemPrompt`.
  */
 export function buildAgentSystemPrompt(input: {
   profile: AgentProfile;
@@ -408,11 +417,14 @@ export function buildAgentSystemPrompt(input: {
       ? `ZONAS DE ENVÍO (cobertura y costo de despacho al cliente):\n${renderDeliveryZones(input.zones)}`
       : null,
     `Etapas del pipeline (en orden): ${stageList}`,
+    // P4a — el bloque fijo de reglas sube ANTES de lo que cambia por turno. Es
+    // la sección más grande del prompt y no depende de la conversación: dejarla
+    // atrás de la etapa actual y la ficha hacía que el prefijo dejara de
+    // coincidir en cada turno y el proveedor no pudiera cachearlo.
+    reglasFijas,
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
     clientFileBlock,
-    reglasFijas,
-    // P6: lo único que cambia en cada turno va al final, para no romper el
-    // prefijo cacheable del resto del prompt.
+    // P6 — lo único que cambia minuto a minuto, al final del todo.
     renderTemporalContext(input.now ?? new Date(), input.timeZone ?? "America/Santiago"),
   ]
     .filter(Boolean)

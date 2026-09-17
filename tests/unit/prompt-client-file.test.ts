@@ -178,14 +178,47 @@ describe("buildAgentSystemPrompt con ficha del cliente", () => {
     expect(prompt).toContain("- Correo: compras@lamas.cl");
   });
 
-  it("ubica el bloque después de la etapa actual y antes de las reglas fijas", () => {
+  it("ubica la ficha en la COLA dinámica, después de todo lo estable (P4a)", () => {
     const prompt = build({ clientFile: { name: "Ana" } });
-    const stageAt = prompt.indexOf("Etapa actual del lead:");
+    // Lo estable va primero y de forma contigua; el proveedor cachea por
+    // prefijo, así que si algo que cambia por turno se cuela antes, se pierde
+    // la caché de todo lo que sigue.
+    const estable = [
+      'Usted es "Asistente comercial"',
+      "Tono:",
+      "Instrucciones del negocio:",
+      "Reglas de escalado a humano:",
+      "CONOCIMIENTO DEL NEGOCIO",
+      "CATÁLOGO DE PRODUCTOS",
+      "ZONAS DE ENVÍO",
+      "Etapas del pipeline",
+      "En cada turno responde ÚNICAMENTE", // bloque fijo de reglas
+    ];
+    const dinamico = [
+      "Etapa actual del lead:",
+      CLIENT_FILE_HEADER,
+      "Fecha y hora actuales:",
+    ];
+
+    const lastEstable = Math.max(...estable.map((s) => prompt.indexOf(s)));
+    const firstDinamico = Math.min(...dinamico.map((s) => prompt.indexOf(s)));
+    expect(lastEstable).toBeGreaterThanOrEqual(0);
+    expect(lastEstable).toBeLessThan(firstDinamico);
+
+    // Y dentro de la cola dinámica se conserva el orden.
+    const etapaAt = prompt.indexOf("Etapa actual del lead:");
     const fichaAt = prompt.indexOf(CLIENT_FILE_HEADER);
+    const fechaAt = prompt.indexOf("Fecha y hora actuales:");
+    expect(etapaAt).toBeLessThan(fichaAt);
+    expect(fichaAt).toBeLessThan(fechaAt);
+  });
+
+  it("el bloque de reglas fijas queda ANTES de la etapa actual y de la ficha (P4a)", () => {
+    const prompt = build({ clientFile: { name: "Ana" } });
     const rulesAt = prompt.indexOf("En cada turno responde ÚNICAMENTE");
-    expect(stageAt).toBeGreaterThanOrEqual(0);
-    expect(fichaAt).toBeGreaterThan(stageAt);
-    expect(rulesAt).toBeGreaterThan(fichaAt);
+    expect(rulesAt).toBeGreaterThanOrEqual(0);
+    expect(rulesAt).toBeLessThan(prompt.indexOf("Etapa actual del lead:"));
+    expect(rulesAt).toBeLessThan(prompt.indexOf(CLIENT_FILE_HEADER));
   });
 });
 
@@ -249,9 +282,9 @@ describe("buildAgentSystemPrompt con notas extensas (P6)", () => {
       profile: { ...PROFILE, instructions: "x" },
       clientFile: { name: "Ana", notes },
     });
-    // El bloque de la ficha va del encabezado hasta las reglas fijas.
+    // La ficha va del encabezado hasta la línea temporal, que cierra el prompt.
     const start = prompt.indexOf(CLIENT_FILE_HEADER);
-    const end = prompt.indexOf("En cada turno responde ÚNICAMENTE");
+    const end = prompt.indexOf("Fecha y hora actuales:");
     const block = prompt.slice(start, end);
     expect(block).toContain(NOTES_TRUNCATED_MARK);
     expect(block).toContain("nota numero 30:");

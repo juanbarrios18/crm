@@ -270,3 +270,38 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
   SQL: es una función pura, testeable, y la lógica de la marca de recorte no
   tiene que vivir en una consulta. La consulta sigue leyendo la columna completa.
 - **Pendientes**: ninguno.
+
+---
+
+## F6 — P4a · Reordenar estático → dinámico
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambio** (`prompts.ts`): el bloque fijo de reglas sube y pasa a integrar el
+  tramo estable. Orden nuevo:
+  1. **Prefijo estable (cacheable)**: identidad → tono → instrucciones →
+     escalado → saludo → conocimiento → catálogo → zonas → etapas → reglas
+     fijas (contrato → N1 → N2 → cierre → formato).
+  2. **Cola dinámica**: etapa actual → ficha del cliente → fecha y hora.
+
+  La sección que se movió es una sola: las reglas fijas pasan de la posición 11
+  a la 9. Nada más cambió de lugar.
+- **Evidencia — "mismo contenido, solo orden" (verificado, no argumentado)**:
+  se bundleó la versión de `prompts.ts` de `HEAD` y la del árbol de trabajo, se
+  generó el prompt con el MISMO caso (perfil, KB, catálogo, zonas, etapa, ficha y
+  momento fijos) y se compararon las secciones:
+  - `mismo multiset de secciones: True` — el contenido es idéntico.
+  - `mismo orden: False` — y el único movimiento es el índice `11 → 9` (las
+    reglas fijas), con la línea temporal sostenida en el índice 12.
+  - Ambas versiones rinden **13 secciones y 5.258 caracteres**.
+- **Tests actualizados con criterio** (no "para que pasen"): el test que fijaba
+  posiciones afirmaba `ficha → reglas fijas`, que era exactamente el orden que
+  P4a corrige. Se reemplazó por el invariante que de verdad importa —el tramo
+  estable queda antes y de forma contigua, la cola dinámica al final y en
+  orden—, que es la propiedad de la que depende la caché. Se agregó además una
+  aserción equivalente sobre el prompt EFECTIVO que sirve
+  `GET /api/agent/prompt`, que es el volcado que pide el plan.
+- **Pendiente de medición**: `cachedTokens > 0` en ≥80 % de las llamadas se mide
+  en la corrida de F10. Acá queda establecido el orden; el efecto se mide.
+- Gate: typecheck OK · lint OK · build OK · test OK (344 tests, +1).
+- **Pendientes**: ninguno.
