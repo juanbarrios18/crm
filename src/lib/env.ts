@@ -39,6 +39,12 @@ const envSchema = z.object({
   OPENROUTER_REASONING_EFFORT: z
     .enum(["low", "medium", "high"])
     .optional(),
+  // Temperatura de muestreo (0-2), opcional. Ausente/vacía → no se envía la
+  // clave y el modelo usa su default. Bajarla reduce la variedad de la salida y
+  // mejora la repetibilidad de datos del negocio (precios, plazos); subirla
+  // aumenta la variedad. chatJson comparte el mismo callProvider, así que la
+  // variable alcanza a conversación, anotación y juez por igual.
+  OPENROUTER_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
   ALLOW_SIGNUP: z.string().optional(),
   AGENT_COALESCE_MS: z.coerce.number().int().min(0).default(6000),
   WA_MOCK_ENABLED: z.string().optional(),

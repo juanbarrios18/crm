@@ -200,6 +200,60 @@ describe("chatJson (reintentos y errores tipados)", () => {
     expect(body.reasoning).toBeUndefined();
   });
 
+  it("envía temperature cuando OPENROUTER_TEMPERATURE está definida", async () => {
+    vi.stubEnv("OPENROUTER_TEMPERATURE", "0.3");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
+    expect(result.ok).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.temperature).toBe(0.3);
+  });
+
+  it("NO envía temperature si OPENROUTER_TEMPERATURE está vacía", async () => {
+    vi.stubEnv("OPENROUTER_TEMPERATURE", "");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await (await getChatJson())(schema, [{ role: "user", content: "hola" }]);
+    expect(result.ok).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.temperature).toBeUndefined();
+  });
+
+  it("acepta los extremos del rango (0 y 2)", async () => {
+    for (const value of ["0", "2"]) {
+      vi.resetModules();
+      vi.stubEnv("OPENROUTER_TEMPERATURE", value);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(providerResponse('{"action":"reply","text":"ok"}'));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await (await getChatJson())(schema, [
+        { role: "user", content: "hola" },
+      ]);
+      expect(result.ok).toBe(true);
+      const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+      expect(body.temperature).toBe(Number(value));
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rechaza una temperatura fuera del rango 0-2", async () => {
+    vi.resetModules();
+    vi.stubEnv("OPENROUTER_TEMPERATURE", "3");
+    const chatJson = await getChatJson();
+    await expect(
+      chatJson(schema, [{ role: "user", content: "hola" }])
+    ).rejects.toThrow(/Variables de entorno/);
+  });
+
   it("fuerza response_format json_object en el body", async () => {
     const fetchMock = vi
       .fn()

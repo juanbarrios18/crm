@@ -160,6 +160,9 @@ async function callProvider(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   // 006: nivel de razonamiento configurable por entorno, si el modelo lo soporta.
   const reasoningEffort = env.OPENROUTER_REASONING_EFFORT;
+  // P3: temperatura explícita opcional. Ausente → la clave no viaja y el body
+  // queda idéntico al de antes, con el default del modelo.
+  const temperature = env.OPENROUTER_TEMPERATURE;
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -170,6 +173,9 @@ async function callProvider(
   };
   if (reasoningEffort) {
     body.reasoning = { effort: reasoningEffort };
+  }
+  if (temperature !== undefined) {
+    body.temperature = temperature;
   }
   try {
     const res = await fetch(`${env.OPENROUTER_BASE_URL}/v1/chat/completions`, {

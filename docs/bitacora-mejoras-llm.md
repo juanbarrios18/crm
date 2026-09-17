@@ -45,3 +45,32 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
   - `agent_profile` de desarrollo: `greeting` 97 chars, `instructions` 2.947
     chars, `escalation_rules` 385 chars — coincide con lo declarado en el plan.
 - **Pendientes**: ninguno.
+
+---
+
+## F1 — P3 · Temperatura explícita
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambios**:
+  - `src/lib/env.ts`: nueva variable `OPENROUTER_TEMPERATURE`, numérica, rango
+    `0–2`, opcional. Al pasar por `stripEmpty`, una variable vacía equivale a
+    ausente.
+  - `src/lib/ai/index.ts` (`callProvider`): envía `temperature` en el body
+    **solo** si está definida, con el mismo patrón que
+    `OPENROUTER_REASONING_EFFORT`.
+  - `.env.example`: guía inline de la variable.
+  - `.env` local: `OPENROUTER_TEMPERATURE=0.3` con comentario que explica el
+    trade-off (repetibilidad de precios frente a variedad).
+  - `tests/unit/ai-adapter.test.ts`: 4 tests nuevos.
+- **Evidencia**:
+  - Las dos ramas quedan fijadas por test: con la variable seteada el body
+    incluye `temperature` (0.3); sin ella la clave no viaja al proveedor.
+  - Extremos del rango aceptados (`0` y `2`); `3` rechazado por el esquema de
+    entorno con `Variables de entorno inválidas o faltantes`.
+  - Gate: typecheck OK · lint OK · build OK · test OK (297 tests, +4 sobre la
+    línea base de 293).
+- **Cuidado registrado**: `chatJson` comparte `callProvider`, así que la misma
+  variable afecta conversación, anotación y juez. Distinguirla por rol es otra
+  decisión y queda fuera de alcance.
+- **Pendientes**: ninguno.
