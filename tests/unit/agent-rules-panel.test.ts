@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 import {
   NIVEL_1_VERDAD_DEL_SISTEMA,
   NIVEL_2_CONDUCTA_UNIVERSAL,
@@ -154,6 +155,28 @@ describe("summarizeRules", () => {
     expect(
       changed.some((group) => group.topic === "Escalamiento a una persona")
     ).toBe(false);
+  });
+
+  it("la marca de saliente humano no cae en el grupo de escalado (P5)", () => {
+    const groups = summarizeRules(
+      NIVEL_1_VERDAD_DEL_SISTEMA,
+      NIVEL_2_CONDUCTA_UNIVERSAL
+    );
+    const markRule = NIVEL_2_CONDUCTA_UNIVERSAL.find((rule) =>
+      rule.includes(HUMAN_ORIGIN_MARK)
+    );
+    expect(markRule).toBeDefined();
+
+    // La regla habla de mensajes escritos por personas del equipo, no de cuándo
+    // escalar: mencionar "una persona del equipo" no debe mandarla al grupo de
+    // escalado.
+    expect(
+      groups.find((group) => group.topic === "Escalamiento a una persona")?.rules
+    ).not.toContain(markRule);
+    expect(
+      groups.find((group) => group.topic === "Mensajes de personas del equipo")
+        ?.rules
+    ).toContain(markRule);
   });
 });
 

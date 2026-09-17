@@ -82,6 +82,17 @@ const THEMES: readonly Theme[] = [
     ],
   },
   {
+    // P5 — la marca de saliente humano. Va ANTES de "Escalamiento a una
+    // persona": esa regla menciona "una persona del equipo" y, sin este tema,
+    // caería en el grupo de escalado, que no es de lo que habla.
+    topic: "Mensajes de personas del equipo",
+    keywords: [
+      "atencion humana del negocio",
+      "escribio una persona",
+      "personas del equipo",
+    ],
+  },
+  {
     topic: "Escalamiento a una persona",
     keywords: ["persona", "humano", "asesor", "handoff"],
   },

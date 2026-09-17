@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 import {
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
@@ -147,6 +148,26 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain('"rut"');
     // Regresión: el prompt no debe hardcodear una etapa fuera de la lista.
     expect(prompt).not.toContain("interesados");
+  });
+});
+
+describe("marca de saliente humano (P5)", () => {
+  it("el prompt de conversación explica la marca (N2)", () => {
+    const prompt = build({
+      kb: [],
+    });
+    expect(prompt).toContain(HUMAN_ORIGIN_MARK);
+    // No alcanza con que la marca aparezca: N2 tiene que decir qué significa.
+    expect(prompt).toContain("los escribió una persona del equipo");
+  });
+
+  it("el prompt de anotación NO explica la marca (no trae N2)", () => {
+    const prompt = buildAnnotationSystemPrompt({
+      profile: PROFILE,
+      stages: STAGES,
+      currentStage: null,
+    });
+    expect(prompt).not.toContain(HUMAN_ORIGIN_MARK);
   });
 });
 

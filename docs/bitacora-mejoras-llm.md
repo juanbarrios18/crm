@@ -120,3 +120,52 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
 - **Sin cambios**: el sandbox del Laboratorio, la semántica de etapa (allowlist y
   solo avance) y el orden cronológico del historial.
 - **Pendientes**: ninguno.
+
+---
+
+## F3 — P5 · Roles del historial: humanos vs. bot
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambios**:
+  - Módulo nuevo `src/server/ai/history.ts` (puro, sin base de datos):
+    `HUMAN_ORIGIN_MARK = "[ATENCIÓN HUMANA DEL NEGOCIO]"`, `isBotOutbound` y
+    `toConversationHistory`. Se eligió un módulo puro —como `handoff.ts`— para
+    poder probar el mapeo sin levantar la base.
+  - `pipeline.ts`: el historial se arma con `toConversationHistory(history)`.
+  - `prompts.ts`: UNA línea nueva en N2 que explica la marca al modelo,
+    interpolando la constante (no puede desincronizarse del render).
+- **Decisiones**:
+  - **Marca en el texto, no rol nuevo**: el proveedor admite solo
+    `system | user | assistant`, así que la persona del negocio no tiene rol
+    propio. El humano viaja como `user` con la marca delante.
+  - **`aiGenerated` además de `origin`**: la columna `origin` nació en 008 con
+    default `"operator"`, así que todo el historial de IA anterior a esa columna
+    quedó con `aiGenerated = true` y `origin = "operator"`. Sin el segundo
+    criterio, ese historial se leería como escrito por una persona. Es BOT todo
+    saliente con `origin === "ai"` **o** `aiGenerated === true`.
+  - **La marca aplica SOLO al prompt de conversación**. La llamada de anotación
+    recibe el historial en modo `plain-assistant` (el humano como `assistant`,
+    sin marca), que es exactamente como viajaba antes de P5: es extracción pura,
+    su prompt no trae N2, y un marcador sin explicación sería ruido. El
+    transcript del Laboratorio y el prompt del juez mapean por `direction` y
+    tampoco la ven.
+- **Hallazgo durante el gate**: la regla nueva de N2 menciona "una persona del
+  equipo" y el clasificador del panel de transparencia
+  (`src/server/ai/rule-summary.ts`) la mandaba al grupo "Escalamiento a una
+  persona", que no es de lo que habla. El test
+  `agent-rules-panel > el resumen se deriva del texto de las reglas` lo detectó
+  al romperse. **Se corrigió el clasificador** (tema nuevo "Mensajes de personas
+  del equipo", antes de escalado) y NO el test: con el arreglo, el invariante del
+  test —que el grupo de escalado tenga una sola regla— se restaura solo.
+  Se agregó un test que fija la clasificación nueva.
+- **Evidencia**:
+  - `tests/unit/agent-history-roles.test.ts` (12 tests): los cuatro orígenes,
+    la distinción bot/humano, el fallback de `aiGenerated` para historial legacy,
+    los dos modos de representación y el orden cronológico.
+  - `tests/unit/prompts-catalog.test.ts`: el prompt de conversación explica la
+    marca; el de anotación no la contiene.
+  - `tests/unit/agent-rules-panel.test.ts`: la regla de la marca no cae en el
+    grupo de escalado.
+  - Gate: typecheck OK · lint OK · build OK · test OK (313 tests, +15).
+- **Pendientes**: ninguno.

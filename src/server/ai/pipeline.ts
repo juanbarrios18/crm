@@ -13,6 +13,7 @@ import {
   type LeadExtractionType,
 } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
+import { toConversationHistory } from "@/server/ai/history";
 import {
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
@@ -287,12 +288,7 @@ export async function runAgentTurn(
         clientFile,
       }),
     },
-    ...history
-      .filter((m) => m.text)
-      .map((m) => ({
-        role: m.direction === "in" ? ("user" as const) : ("assistant" as const),
-        content: m.text!,
-      })),
+    ...toConversationHistory(history),
   ];
 
   // Mensajes de la anotación (llamada 2). Su ENTRADA no depende del reply de la
@@ -300,6 +296,10 @@ export async function runAgentTurn(
   // ANTES y puede lanzarse en paralelo. La extracción de etapa y campos NUNCA
   // puede tumbar la conversación: si falla, se registra un aviso y el turno
   // entrega igual la respuesta.
+  //
+  // El historial va en modo `plain-assistant`: la marca de saliente humano la
+  // explica N2, que vive solo en el prompt de conversación. Acá es extracción
+  // pura y el marcador sería ruido sin explicación.
   const annotationMessages: ChatMessage[] = [
     {
       role: "system",
@@ -309,7 +309,7 @@ export async function runAgentTurn(
         currentStage: currentStage?.name ?? null,
       }),
     },
-    ...messages.slice(1),
+    ...toConversationHistory(history, { humanOutbound: "plain-assistant" }),
   ];
 
   // ── Llamadas 1 y 2 EN PARALELO (P1) ───────────────────────────────────────

@@ -25,6 +25,7 @@
 
 import type { schema } from "@/lib/db";
 import type { PublicProduct } from "@/lib/catalog";
+import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 
 type AgentProfile = typeof schema.agentProfile.$inferSelect;
 type KbEntry = typeof schema.kbEntry.$inferSelect;
@@ -250,6 +251,7 @@ export const NIVEL_2_CONDUCTA_UNIVERSAL: readonly string[] = [
   "- Si el cliente pide que le mande la boleta, los datos de transferencia, un resumen o cualquier documento por correo/WhatsApp, indíquele que eso lo gestiona el equipo comercial y que usted no puede enviarlo. Nunca diga 'ya lo envié', 'revisé' ni 'quedó agendado'.",
   "- Solo puede afirmar lo que está en el conocimiento/catálogo o lo que el cliente le dijo. Ante la duda, no asegure: ofrezca confirmarlo con el equipo.",
   "- Si el cliente pide algo NO contemplado en el conocimiento (descuento, crédito, condición especial), no lo ofrezca ni lo niegue en seco: indíquele que un asesor puede evaluarlo y, si insiste, escale.",
+  `- Los mensajes marcados con ${HUMAN_ORIGIN_MARK} los escribió una persona del equipo, no usted: son parte de la conversación y el cliente ya los leyó. No los trate como suyos, no los repita ni los contradiga.`,
   "- Si el cliente pide hablar con una persona/humano/asesor → handoff.",
   "- Si la pregunta NO está cubierta por el conocimiento ni el catálogo → NO invente: responda que lo confirmará o escale.",
 ];
