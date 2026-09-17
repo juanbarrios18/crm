@@ -167,6 +167,42 @@ const CLIENT_FILE_FIELDS: readonly [string, keyof ClientFile][] = [
 ];
 
 /**
+ * Tope de LECTURA de las notas de la ficha (P6).
+ *
+ * `appendLeadNote` acumula una línea `[IA] …` por turno y las notas crecen sin
+ * techo en la base: sin tope, la ficha se come el prompt. El tope es de lectura,
+ * NO de escritura: la base sigue guardando todo.
+ */
+export const CLIENT_FILE_NOTES_MAX_CHARS = 1500;
+
+/** Marca visible de recorte, para que el modelo sepa que la lista está incompleta. */
+export const NOTES_TRUNCATED_MARK =
+  "[…se omitieron notas anteriores por longitud]";
+
+/**
+ * Recorta las notas conservando las MÁS RECIENTES.
+ *
+ * Las notas se acumulan en orden cronológico (`appendLeadNote` agrega al final),
+ * así que se conserva la cola. El corte busca un salto de línea para no partir
+ * una nota por la mitad; si no lo encuentra, corta igual. El resultado —marca
+ * incluida— nunca supera `max`. Determinista y sin LLM a propósito: resumir con
+ * el modelo costaría una llamada por turno y no sería reproducible.
+ */
+export function capNotes(
+  notes: string,
+  max: number = CLIENT_FILE_NOTES_MAX_CHARS
+): string {
+  const trimmed = notes.trim();
+  if (trimmed.length <= max) return trimmed;
+
+  const prefix = `${NOTES_TRUNCATED_MARK}\n`;
+  const tail = trimmed.slice(trimmed.length - (max - prefix.length));
+  const firstBreak = tail.indexOf("\n");
+  const kept = firstBreak === -1 ? tail : tail.slice(firstBreak + 1);
+  return `${prefix}${kept}`;
+}
+
+/**
  * Renderiza la ficha del cliente para inyectarla en el prompt del agente.
  *
  * Función PURA. Devuelve `null` cuando no hay ningún dato útil (ficha ausente o
@@ -174,6 +210,9 @@ const CLIENT_FILE_FIELDS: readonly [string, keyof ClientFile][] = [
  * respecto de no tener ficha. Cuando hay al menos un dato, devuelve el
  * encabezado más una viñeta por campo presente. No inventa valores ni rellena
  * con "sin datos": los campos ausentes simplemente se omiten.
+ *
+ * Sin notas, la salida es idéntica a la de antes del tope: `capNotes` devuelve
+ * el texto ya recortado de espacios y no agrega marca.
  */
 export function renderClientFile(
   ficha: ClientFile | null | undefined
@@ -182,10 +221,32 @@ export function renderClientFile(
   const lines = CLIENT_FILE_FIELDS.map(([label, key]) => {
     const raw = ficha[key];
     const value = typeof raw === "string" ? raw.trim() : raw;
-    return value ? `- ${label}: ${value}` : null;
+    if (!value) return null;
+    const text = key === "notes" ? capNotes(value) : value;
+    return `- ${label}: ${text}`;
   }).filter((line): line is string => line !== null);
   if (lines.length === 0) return null;
   return `${CLIENT_FILE_HEADER}\n${lines.join("\n")}`;
+}
+
+/**
+ * Línea de contexto temporal (P6). Va al FINAL del prompt, después de todo lo
+ * estable: es lo único que cambia en cada turno, así que ponerla al final deja
+ * el prefijo cacheable intacto.
+ *
+ * La zona horaria es un dato del negocio (`BUSINESS_TIMEZONE`); el formateo sale
+ * de Intl, así que respeta el horario de verano de la zona.
+ */
+export function renderTemporalContext(now: Date, timeZone: string): string {
+  const formatted = new Intl.DateTimeFormat("es-CL", {
+    timeZone,
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(now);
+  return (
+    `Fecha y hora actuales: ${formatted} (zona ${timeZone}). ` +
+    "Úselas para razonar sobre plazos y días de atención; no las repita salvo que el cliente pregunte por fechas."
+  );
 }
 
 /**
@@ -310,6 +371,10 @@ export function buildAgentSystemPrompt(input: {
   catalog?: PublicProduct[];
   zones?: { comuna: string; costoDespacho: number | null }[];
   clientFile?: ClientFile | null;
+  /** Momento del turno; explícito para poder probar la línea temporal. */
+  now?: Date;
+  /** Zona horaria IANA del negocio (`BUSINESS_TIMEZONE`). */
+  timeZone?: string;
 }): string {
   const { profile } = input;
   const clientFileBlock = renderClientFile(input.clientFile);
@@ -346,6 +411,9 @@ export function buildAgentSystemPrompt(input: {
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
     clientFileBlock,
     reglasFijas,
+    // P6: lo único que cambia en cada turno va al final, para no romper el
+    // prefijo cacheable del resto del prompt.
+    renderTemporalContext(input.now ?? new Date(), input.timeZone ?? "America/Santiago"),
   ]
     .filter(Boolean)
     .join("\n\n");

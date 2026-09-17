@@ -211,3 +211,62 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
   de P7 son los tests unitarios y el barrido de arriba, no una métrica del
   Laboratorio.
 - **Pendientes**: ninguno.
+
+---
+
+## F5 — P6 · Fecha, hora y tope de notas
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambios**:
+  - `prompts.ts`: `renderTemporalContext(now, timeZone)` con la fecha y hora
+    actuales, y `capNotes(notes, max)` con el tope de lectura de notas
+    (`CLIENT_FILE_NOTES_MAX_CHARS = 1500`) más la marca visible
+    `NOTES_TRUNCATED_MARK`. `renderClientFile` aplica el tope SOLO a `notes`.
+  - `buildAgentSystemPrompt` recibe `now` y `timeZone` como parámetros
+    explícitos: sigue siendo una función pura y por eso es probable con un
+    momento fijo (sin eso, dos builds del mismo caso podían diferir si el reloj
+    cruzaba el minuto).
+  - La línea temporal va **al final** del prompt: es lo único que cambia por
+    turno, así que todo lo anterior queda como prefijo cacheable.
+  - `env.ts`: `BUSINESS_TIMEZONE`, opcional, con default `America/Santiago` y
+    validación contra `Intl`. Un typo falla al arrancar y no en cada turno.
+  - `pipeline.ts` y `GET /api/agent/prompt` pasan la zona configurada (el panel
+    muestra el prompt EFECTIVO, así que debe usar la misma).
+  - `.env.example`: guía inline de la variable.
+- **Decisiones**:
+  - **Zona configurable, no hardcodeada**: la zona horaria es un dato del
+    negocio. El default es `America/Santiago`.
+  - **El tope es de LECTURA**: `appendLeadNote` sigue acumulando todo en la base.
+  - **Recorte determinista, sin LLM**: se conservan las notas MÁS RECIENTES (se
+    guarda la cola, que es donde `appendLeadNote` agrega) y el corte busca un
+    salto de línea para no partir una nota por la mitad. Resumir con el modelo
+    costaría una llamada por turno y no sería reproducible.
+  - **Sin notas la salida es idéntica** a la anterior: `capNotes` no agrega marca
+    cuando el texto cabe.
+- **Evidencia**:
+  - **Medición sobre datos reales de la base de desarrollo**: el contacto con
+    más notas ya tiene **2.226 caracteres en 22 líneas** — o sea, el tope no es
+    teórico, ya hay un contacto que lo supera. Recortado da **1.452 caracteres en
+    16 líneas**: **774 caracteres (~242 tokens) menos en cada turno** de ese
+    contacto, con la nota más reciente conservada textualmente y la marca de
+    recorte presente.
+  - `tests/unit/prompt-client-file.test.ts`: las dos ramas del plan (con 30 notas
+    la ficha no supera el tope y conserva las recientes; sin notas es idéntica a
+    la anterior), más el corte en salto de línea y el determinismo.
+  - `tests/unit/prompts-catalog.test.ts`: la línea temporal es la última sección
+    del prompt, y el mismo instante cae en días distintos según la zona
+    (`2026-09-17T02:00Z` → 16 en Santiago, 17 en Auckland), lo que prueba que la
+    zona configurada se aplica de verdad.
+  - `tests/unit/env-business-timezone.test.ts` (5 tests): default, cadena vacía
+    como ausente, zona válida y dos valores inválidos rechazados al arrancar.
+  - `tests/unit/support/agent-turn-env.ts`: helper con el entorno mínimo del
+    turno. Al pasar el turno a leer `getEnv()`, cuatro tests del pipeline
+    necesitaban la configuración completa; se centralizó para que agregar una
+    variable no obligue a tocar cada test.
+  - Gate: typecheck OK · lint OK · build OK · test OK (342 tests, +16).
+- **Desvío del plan, declarado**: el plan mencionaba también "la consulta del
+  contacto en `pipeline.ts`". El tope se aplicó en `renderClientFile` y no en
+  SQL: es una función pura, testeable, y la lógica de la marca de recorte no
+  tiene que vivir en una consulta. La consulta sigue leyendo la columna completa.
+- **Pendientes**: ninguno.

@@ -45,6 +45,13 @@ const CATALOG = [
 
 const ZONES = [{ comuna: "Macul", costoDespacho: 4500 }];
 
+/**
+ * Momento fijo: el prompt incluye una línea con la fecha y hora del turno, así
+ * que un `new Date()` real haría que dos builds del mismo caso difieran si el
+ * reloj cruza el minuto entre uno y otro.
+ */
+const FIXED_NOW = new Date("2026-09-17T15:30:00Z");
+
 function build(input: Partial<Parameters<typeof buildAgentSystemPrompt>[0]> = {}) {
   return buildAgentSystemPrompt({
     profile: PROFILE,
@@ -52,6 +59,8 @@ function build(input: Partial<Parameters<typeof buildAgentSystemPrompt>[0]> = {}
     stages: STAGES,
     catalog: CATALOG,
     zones: ZONES,
+    now: FIXED_NOW,
+    timeZone: "America/Santiago",
     ...input,
   });
 }
@@ -148,6 +157,47 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain('"rut"');
     // Regresión: el prompt no debe hardcodear una etapa fuera de la lista.
     expect(prompt).not.toContain("interesados");
+  });
+});
+
+describe("contexto temporal (P6)", () => {
+  it("la línea temporal va AL FINAL del prompt", () => {
+    const prompt = build();
+    const temporalAt = prompt.indexOf("Fecha y hora actuales:");
+    expect(temporalAt).toBeGreaterThan(0);
+    // Nada después de la línea temporal: es lo único que cambia por turno, así
+    // que el prefijo estable queda cacheable.
+    const after = prompt.slice(temporalAt);
+    expect(after).toContain("Fecha y hora actuales:");
+    for (const stable of [
+      "En cada turno responde ÚNICAMENTE",
+      "Etapa actual del lead:",
+      "CONOCIMIENTO DEL NEGOCIO",
+      "CATÁLOGO DE PRODUCTOS",
+    ]) {
+      expect(prompt.indexOf(stable)).toBeLessThan(temporalAt);
+    }
+    // Efectivamente es la última sección.
+    expect(prompt.lastIndexOf("\n\n")).toBeLessThan(temporalAt);
+  });
+
+  it("formatea la fecha en la zona del negocio", () => {
+    const prompt = build();
+    expect(prompt).toContain("jueves, 17 de septiembre de 2026");
+    expect(prompt).toContain("(zona America/Santiago)");
+  });
+
+  it("respeta una zona horaria distinta (el día puede cambiar)", () => {
+    // 2026-09-17T02:00Z son las 23:00 del 16 en Santiago (UTC-3, horario de
+    // verano chileno) y las 14:00 del 17 en Auckland (UTC+12): el mismo instante
+    // cae en días distintos según la zona configurada.
+    const instant = new Date("2026-09-17T02:00:00Z");
+    expect(build({ now: instant, timeZone: "America/Santiago" })).toContain(
+      "16 de septiembre de 2026"
+    );
+    expect(build({ now: instant, timeZone: "Pacific/Auckland" })).toContain(
+      "17 de septiembre de 2026"
+    );
   });
 });
 

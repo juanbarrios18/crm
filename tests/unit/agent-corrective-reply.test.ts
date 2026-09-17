@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { stubAgentTurnEnv } from "./support/agent-turn-env";
 
 /**
  * El modelo chico suele devolver reply vacío y dejar al cliente colgado. El
@@ -90,7 +91,7 @@ describe("pipeline: corrección cuando la acción no trae respuesta", () => {
     inserts.length = 0;
     responses.length = 0;
     call = 0;
-    vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
+    stubAgentTurnEnv();
   });
 
   it("conversación sin texto → corrige y responde conservando la nota", async () => {

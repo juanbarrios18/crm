@@ -46,6 +46,16 @@ const envSchema = z.object({
   // variable alcanza a conversación, anotación y juez por igual.
   OPENROUTER_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
   ALLOW_SIGNUP: z.string().optional(),
+  // Zona horaria del negocio para la línea de fecha y hora del prompt (P6). Se
+  // valida contra Intl: un valor inexistente debe fallar al arrancar, no en cada
+  // turno. Es un dato del negocio, así que es configurable.
+  BUSINESS_TIMEZONE: z
+    .string()
+    .default("America/Santiago")
+    .refine(isValidTimeZone, {
+      message:
+        "BUSINESS_TIMEZONE debe ser una zona horaria IANA válida (p. ej. America/Santiago)",
+    }),
   AGENT_COALESCE_MS: z.coerce.number().int().min(0).default(6000),
   WA_MOCK_ENABLED: z.string().optional(),
   // Gate de adjuntos entrantes (008): por defecto los archivos adjuntos de
@@ -67,6 +77,16 @@ const envSchema = z.object({
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+/** ¿Intl reconoce esta zona horaria? Un typo debe fallar al arrancar. */
+function isValidTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("es-CL", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const BUILD_PLACEHOLDERS: Record<string, string> = {
   APP_BASE_URL: "http://localhost:3000",

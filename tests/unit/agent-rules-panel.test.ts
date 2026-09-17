@@ -84,9 +84,16 @@ const { GET } = await import("@/app/api/agent/prompt/route");
 
 beforeEach(() => {
   selectQueue.length = 0;
+  // El route arma el prompt EFECTIVO: `getEnv` valida el entorno real.
+  vi.stubEnv("APP_BASE_URL", "http://localhost:3000");
+  vi.stubEnv("DATABASE_URL", "postgresql://t:t@localhost:5432/t");
+  vi.stubEnv("BETTER_AUTH_SECRET", "secret-de-test-suficiente");
+  vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 3).toString("base64"));
+  vi.stubEnv("META_WEBHOOK_VERIFY_TOKEN", "verify-test");
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 

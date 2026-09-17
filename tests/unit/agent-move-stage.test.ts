@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { stubAgentTurnEnv } from "./support/agent-turn-env";
 
 /**
  * Regresión: el agente movía el lead solo con la acción `move_stage`, que el
@@ -141,7 +142,7 @@ describe("pipeline: etapa como campo independiente de la acción", () => {
     updates.length = 0;
     aiResponses.length = 0;
     aiCall = 0;
-    vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
+    stubAgentTurnEnv();
   });
 
   it("una acción reply con stage mueve el lead y responde", async () => {

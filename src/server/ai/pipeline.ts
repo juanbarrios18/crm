@@ -286,6 +286,8 @@ export async function runAgentTurn(
         catalog,
         zones,
         clientFile,
+        now: new Date(),
+        timeZone: getEnv().BUSINESS_TIMEZONE,
       }),
     },
     ...toConversationHistory(history),

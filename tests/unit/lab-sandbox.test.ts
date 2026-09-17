@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { stubAgentTurnEnv } from "./support/agent-turn-env";
 
 /**
  * FR-031/FR-082: el turno del agente sobre una conversación is_test persiste
@@ -113,7 +114,7 @@ describe("sandbox del Laboratorio en el pipeline del agente", () => {
     aiResolvedAt.length = 0;
     outboundInsertedAt = 0;
     aiCall = 0;
-    vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
+    stubAgentTurnEnv();
   });
 
   /** Cola de selects válida para un turno simple sobre `is_test`. */

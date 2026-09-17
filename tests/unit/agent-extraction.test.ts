@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { stubAgentTurnEnv } from "./support/agent-turn-env";
 
 /**
  * Separación conversación / anotación:
@@ -184,7 +185,7 @@ describe("pipeline: llamada de anotación separada de la conversación", () => {
     updates.length = 0;
     aiResults.length = 0;
     aiCall = 0;
-    vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
+    stubAgentTurnEnv();
   });
 
   it("una extracción vacía no escribe nada y no rompe el turno", async () => {
