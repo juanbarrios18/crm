@@ -113,6 +113,81 @@ export function renderKb(entries: KbEntry[]): string {
 export const ANNOTATION_MARKER = "[ANOTACION]";
 
 /**
+ * Ficha comercial del cliente ya capturada por el agente.
+ *
+ * Refleja las columnas de la tabla `contact` (`src/lib/db/schema.ts`): los
+ * nombres de campo coinciden EXACTAMENTE para que la consulta del turno se
+ * proyecte directo sobre este tipo. Todos son opcionales y anulables: un
+ * contacto recién creado no tiene ninguno.
+ */
+export type ClientFile = {
+  name?: string | null;
+  notes?: string | null;
+  empresa?: string | null;
+  rubro?: string | null;
+  comuna?: string | null;
+  rut?: string | null;
+  razonSocial?: string | null;
+  giro?: string | null;
+  direccionFacturacion?: string | null;
+  email?: string | null;
+  frecuenciaDespacho?: string | null;
+  volumenSemanal?: string | null;
+  productoInteres?: string | null;
+  formato?: string | null;
+};
+
+/**
+ * Encabezado del bloque de ficha. Declara el propósito para que el modelo
+ * entienda que son datos YA conocidos y no los vuelva a preguntar.
+ */
+export const CLIENT_FILE_HEADER =
+  "FICHA DEL CLIENTE (datos que YA se conocen; no los vuelva a preguntar):";
+
+/**
+ * Orden estable de las viñetas. `notes` va al final aunque el tipo empiece con
+ * él: la ficha se lee mejor con los datos comerciales primero.
+ */
+const CLIENT_FILE_FIELDS: readonly [string, keyof ClientFile][] = [
+  ["Nombre", "name"],
+  ["Empresa", "empresa"],
+  ["Rubro", "rubro"],
+  ["Comuna", "comuna"],
+  ["RUT", "rut"],
+  ["Razón social", "razonSocial"],
+  ["Giro", "giro"],
+  ["Dirección de facturación", "direccionFacturacion"],
+  ["Correo", "email"],
+  ["Frecuencia de despacho", "frecuenciaDespacho"],
+  ["Volumen semanal", "volumenSemanal"],
+  ["Producto de interés", "productoInteres"],
+  ["Formato", "formato"],
+  ["Notas previas", "notes"],
+];
+
+/**
+ * Renderiza la ficha del cliente para inyectarla en el prompt del agente.
+ *
+ * Función PURA. Devuelve `null` cuando no hay ningún dato útil (ficha ausente o
+ * todos los campos vacíos/solo espacios), de modo que el prompt no cambie
+ * respecto de no tener ficha. Cuando hay al menos un dato, devuelve el
+ * encabezado más una viñeta por campo presente. No inventa valores ni rellena
+ * con "sin datos": los campos ausentes simplemente se omiten.
+ */
+export function renderClientFile(
+  ficha: ClientFile | null | undefined
+): string | null {
+  if (!ficha) return null;
+  const lines = CLIENT_FILE_FIELDS.map(([label, key]) => {
+    const raw = ficha[key];
+    const value = typeof raw === "string" ? raw.trim() : raw;
+    return value ? `- ${label}: ${value}` : null;
+  }).filter((line): line is string => line !== null);
+  if (lines.length === 0) return null;
+  return `${CLIENT_FILE_HEADER}\n${lines.join("\n")}`;
+}
+
+/**
  * CONTRATO_TECNICO — contrato JSON de salida de la llamada de CONVERSACIÓN.
  *
  * NO es un nivel de instrucción: es plomería técnica del producto. Fija el
@@ -232,8 +307,10 @@ export function buildAgentSystemPrompt(input: {
   currentStage?: string | null;
   catalog?: PublicProduct[];
   zones?: { comuna: string; costoDespacho: number | null }[];
+  clientFile?: ClientFile | null;
 }): string {
   const { profile } = input;
+  const clientFileBlock = renderClientFile(input.clientFile);
   const stageList = input.stages
     .map((s, i) => {
       const tag =
@@ -265,6 +342,7 @@ export function buildAgentSystemPrompt(input: {
       : null,
     `Etapas del pipeline (en orden): ${stageList}`,
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
+    clientFileBlock,
     reglasFijas,
   ]
     .filter(Boolean)
