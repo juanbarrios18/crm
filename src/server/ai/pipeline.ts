@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
 import { getEnv, isAiConfigured } from "@/lib/env";
@@ -213,6 +213,35 @@ export async function runAgentTurn(
   const currentStageId = leadRows[0]?.stageId ?? null;
   const currentStage = stages.find((s) => s.id === currentStageId) ?? null;
 
+  // Ficha del cliente: datos comerciales ya capturados + nombre + notas. Se
+  // inyecta en el prompt para que el agente NO vuelva a preguntar lo conocido.
+  const contactRows = await db
+    .select({
+      name: schema.contact.name,
+      notes: schema.contact.notes,
+      empresa: schema.contact.empresa,
+      rubro: schema.contact.rubro,
+      comuna: schema.contact.comuna,
+      rut: schema.contact.rut,
+      razonSocial: schema.contact.razonSocial,
+      giro: schema.contact.giro,
+      direccionFacturacion: schema.contact.direccionFacturacion,
+      email: schema.contact.email,
+      frecuenciaDespacho: schema.contact.frecuenciaDespacho,
+      volumenSemanal: schema.contact.volumenSemanal,
+      productoInteres: schema.contact.productoInteres,
+      formato: schema.contact.formato,
+    })
+    .from(schema.contact)
+    .where(
+      and(
+        eq(schema.contact.id, conversation.contactId),
+        eq(schema.contact.organizationId, organizationId)
+      )
+    )
+    .limit(1);
+  const clientFile = contactRows[0] ?? null;
+
   // 005 — contexto comercial: catálogo público + zonas de envío (NUNCA el costo).
   const catalog = await getActiveProductsPublic(organizationId);
   const zones = await getActiveZones(organizationId);
@@ -227,6 +256,7 @@ export async function runAgentTurn(
         currentStage: currentStage?.name ?? null,
         catalog,
         zones,
+        clientFile,
       }),
     },
     ...history
