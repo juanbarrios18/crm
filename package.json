@@ -24,6 +24,7 @@
     "seed:products": "esbuild scripts/seed/products.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-products.mjs --alias:@=./src --packages=external && node .tmp-seed-products.mjs",
     "seed:zones": "esbuild scripts/seed/zones.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-zones.mjs --alias:@=./src --packages=external && node .tmp-seed-zones.mjs",
     "seed:catalog": "esbuild scripts/seed/catalog.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-catalog.mjs --alias:@=./src --packages=external && node .tmp-seed-catalog.mjs",
+    "seed:business-profile": "esbuild scripts/seed/business-profile.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-business-profile.mjs --alias:@=./src --packages=external && node .tmp-seed-business-profile.mjs",
     "lab:check": "esbuild scripts/lab-run.ts --bundle --platform=node --format=esm --outfile=.tmp-lab-run.mjs --alias:@=./src --packages=external && node --env-file=.env .tmp-lab-run.mjs --check",
     "lab:run": "esbuild scripts/lab-run.ts --bundle --platform=node --format=esm --outfile=.tmp-lab-run.mjs --alias:@=./src --packages=external && node --env-file=.env .tmp-lab-run.mjs"
   },

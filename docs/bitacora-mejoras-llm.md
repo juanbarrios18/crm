@@ -359,3 +359,56 @@ F0 versiona los tres documentos que sí existen y son aporte de esta PR.
   COMPORTAMIENTO y no cifras: un número escrito en una guía envejece en silencio,
   que es justo lo que había pasado.
 - **Pendientes**: ninguno.
+
+---
+
+## F8 — P0 · Registro de la configuración del negocio (B1 aplicado)
+
+- **Estado**: hecha
+- **Rama**: `feat/mejoras-interaccion-llm`
+- **Cambios**:
+  - `src/server/seed/business-profile.ts`: el texto del negocio (nombre, tono,
+    saludo, instrucciones, escalado), como módulo importable y testeable.
+  - `scripts/seed/business-profile.ts` + `pnpm seed:business-profile`: CLI
+    **idempotente** (actualiza el perfil si existe, lo crea si no).
+  - Aplicado al `agent_profile` de la organización de desarrollo.
+- **Diagnóstico confirmado (la causa directa de los hallazgos de tono)**: la
+  configuración se CONTRADECÍA a sí misma. El campo `tone` declaraba
+  *"Tratamiento: usted. Registro: cordial y profesional, español de Chile"*,
+  mientras las `instructions` y el `escalationRules` estaban en **voseo
+  rioplatense**: `Sos`, `Atendés`, `ofrecé`, `dejá`, `decí`, `pedí`,
+  `despedite`, `escalá`, `averiguá`, `preguntá`, `pedile`. El modelo imita el
+  registro de sus instrucciones, así que el agente le escribía al cliente en el
+  registro de las instrucciones y el juez le marcaba `tono` por contradecir su
+  propia voz configurada. **El agente estaba penalizado por obedecer.**
+- **Registro aplicado (B1)**: la configuración específica de un negocio va en el
+  **español del negocio** —chileno, trato de usted—, no en neutro. Es la
+  excepción que fijó el dueño: el neutro aplica a la configuración general del
+  CRM (código, UI, docs). Queda documentado en el encabezado del seed para que
+  nadie lo "corrija" a neutro más adelante. El voseo rioplatense sigue prohibido.
+- **Evidencia**:
+  - **Voseo: 16 ocurrencias → 0** (medido sobre los campos de la base). Antes:
+    `Sos`, `ofrecé`, `dejá`, `decí`, `Decí`, `pedí`, `despedite`, `sos`, `escalá`.
+  - **Contenido comercial íntegro**: 25 líneas de viñeta en la configuración
+    vieja y 25 en la nueva. El test lo verifica **hecho por hecho**, con 24
+    aserciones sobre mínimos, plazos, horarios, dirección, pago, factura/boleta,
+    IVA, crédito, alto volumen, facturación y reglas.
+  - **Prompt efectivo** (construido con la configuración real de la base):
+    8.375 caracteres, **cero voseo y cero fórmulas de call center**.
+  - **Idempotencia verificada**: dos corridas seguidas del seed dejan
+    `agent_profile` con **1 fila**.
+  - `tests/unit/business-profile.test.ts` (33 tests): registro, ausencia de
+    fórmulas telefónicas, saludo sin tercera persona y las 24 aserciones de
+    contenido.
+  - Gate: typecheck OK · lint OK · build OK · test OK (390 tests, +33).
+- **Observación fuera de alcance (para el dueño, no se tocó)**: la constante
+  `CLOSING_FAREWELL` (`prompts.ts`) —el cierre determinista de respaldo— dice
+  "Quedamos a la orden para cualquier otra duda", que es del mismo registro que
+  las fórmulas que el juez penaliza, y `CIERRE_DE_CONVERSACION` la parafrasea.
+  Es voz de PRODUCTO, no dato del negocio, así que cambiarla es otra decisión.
+  Afecta pocos casos (los caminos que no tienen `reply` del modelo), no los 25 de
+  39 del diagnóstico.
+- **Observación menor**: `scripts/seed/catalog.ts` tiene voseo en un mensaje de
+  error (`revisá`, `regístrate`). El guardián de registro no escanea `scripts/`,
+  así que no lo detecta. No se tocó para no ampliar el diff de esta fase.
+- **Pendientes**: ninguno.
