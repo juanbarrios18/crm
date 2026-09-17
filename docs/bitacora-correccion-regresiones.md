@@ -266,12 +266,90 @@ AGENTE : Comprendo su consulta. Las condiciones de pago son transferencia previa
 | Fase | Rama | Commit | Corrida | Caché % | Facturados/turno | Graves | Lectura de la vara | Decisión |
 |---|---|---|---|---|---|---|---|---|
 | P0 | `fix/regresiones-pr22-p1-temporal` | (esta bitácora) | — | — | — | — | Vara definida | — |
-| P1 | `fix/regresiones-pr22-p1-temporal` | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente |
+| P1 | `fix/regresiones-pr22-p1-temporal` | `65ead01` | `run_u2axddp36emj85zl1atq`, `run_sappvbnn496o6l0d37r7` | 8,2 % / 5,2 % | 4.274 / 4.467 | 19 / 25 | Sin mejora sostenida | **NO cumple** (ver sección 5) |
 | P2 | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente |
 | P3 | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente |
 | P4 | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente | pendiente |
 
-## 5. Consulta de métricas
+## 5. P1 — resultado medido (cerrado SIN cumplir el criterio)
+
+Tres corridas comparables (mismos modelos, misma temperatura, mismos datos
+congelados):
+
+| Corrida | Estado | % de caché | Facturados/turno | Turnos con caché | Graves | `judge_failed` |
+|---|---|---|---|---|---|---|
+| `run_uzw4zmt4fyg09sczm7lg` | antes de P1 | 12,1 % | 4.007 | 26,0 % | 27 | 0 |
+| `run_u2axddp36emj85zl1atq` | P1, corrida 1 | 8,2 % | 4.274 | 18,1 % | 19 | 1 |
+| `run_sappvbnn496o6l0d37r7` | P1, corrida 2 | 5,2 % | 4.467 | 11,6 % | 25 | 3 |
+
+**El criterio de P1 no se cumple.** La meta era caché ≥30 % y facturados ≤3.200;
+las dos corridas quedaron **por debajo** del estado anterior. Los hallazgos graves
+(19 y 25 contra 27) no muestran una mejora sostenida: la dispersión entre las dos
+corridas posteriores es de 6, del orden del ruido del instrumento.
+
+### 5.1 La mecánica del proveedor, medida con una sonda controlada
+
+Antes de gastar una corrida se midió cómo acredita la caché el proveedor. Sonda
+con el mismo prefijo y las mismas preguntas, 5 turnos por forma, 2 pasadas,
+`google/gemini-2.5-flash-lite` vía OpenRouter:
+
+| Forma de los mensajes | Caché observada |
+|---|---|
+| A: temporal dentro del system (estado anterior) | 0 % |
+| B: temporal como system final, tras el historial | 0 % |
+| C: temporal pegado al último mensaje del cliente | 81–82 % |
+| G: temporal como mensaje `user` aparte, al final | 80–82 % |
+| H: sin temporal (techo medido) | 82–85 % |
+
+Con un system prompt estable la caché se recupera casi por completo. La forma B
+(la propuesta primaria del plan) no funciona contra el proveedor real; por eso P1
+se implementó con la forma C, que es la alternativa (a) documentada en el plan.
+
+### 5.2 Por qué no alcanzó: el system prompt cambia en cada turno
+
+La corrida 2 se instrumentó con un proxy local (sin tocar el repositorio) que
+registró cada llamada real: hash del system, hash del prefijo y el `usage` que
+devuelve el proveedor. 332 llamadas registradas.
+
+| Tipo de llamada | Llamadas | System prompts distintos | % de caché |
+|---|---|---|---|
+| Conversación | 129 | **123** | 7,5 % |
+| Anotación | 129 | 3 | 0,0 % |
+| Juez | 76 | 1 | **45,3 %** |
+
+La lectura es directa:
+
+- El **juez** tiene un system estable y cobra 45,3 % de caché. Eso prueba que el
+  proveedor sí acredita caché cuando el prefijo se repite.
+- La **conversación** cambia de system en **123 de 129 llamadas**, así que su
+  prefijo casi nunca se repite y solo cobra 7,5 %.
+- La **anotación** tiene apenas 3 systems distintos (uno por etapa), pero su
+  prefijo incluye los últimos 6 mensajes del hilo, que se corren en cada turno:
+  no cobra nada.
+
+**Causa raíz**: el system prompt de conversación embebe estado que cambia en cada
+turno — `Etapa actual del lead` y la ficha del cliente — que el propio pipeline
+escribe al anotar. Mientras esas dos piezas vivan dentro del system, ningún
+reordenamiento interno recupera la caché.
+
+### 5.3 Lo que P1 sí dejó verificado
+
+- La nota interna **no se filtra a las respuestas**: cero apariciones de
+  `CONTEXTO INTERNO` en los transcripts de las dos corridas.
+- Los hallazgos de `tono` de las corridas nuevas son los problemas ya conocidos de
+  P3 y P4 (el cierre "quedamos a su disposición", "Estimado cliente" y el nombre
+  de la ficha repetido en cada mensaje). No son un efecto del cambio.
+- El cambio es **necesario pero no suficiente**: deja el system sin la única pieza
+  que cambiaba minuto a minuto, pero no lo vuelve estable.
+
+### 5.4 Consecuencia para el resto del plan
+
+La meta de caché del plan (≥30 %) exige un system prompt **estable por turno**:
+sacar también la etapa y la ficha del system y llevarlas con el mensaje del
+cliente, como la línea temporal. Es un cambio de comportamiento y toca justamente
+la pregunta de orden que P2 debía atribuir, así que la decisión es del dueño.
+
+## 6. Consulta de métricas
 
 Desglose de consumo y caché por corrida (Anexo A de
 `docs/auditoria-regresiones-pr22.md`):
