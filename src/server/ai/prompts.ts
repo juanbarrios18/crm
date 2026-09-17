@@ -25,6 +25,7 @@
 
 import type { schema } from "@/lib/db";
 import type { PublicProduct } from "@/lib/catalog";
+import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 
 type AgentProfile = typeof schema.agentProfile.$inferSelect;
 type KbEntry = typeof schema.kbEntry.$inferSelect;
@@ -113,6 +114,21 @@ export function renderKb(entries: KbEntry[]): string {
 export const ANNOTATION_MARKER = "[ANOTACION]";
 
 /**
+ * Cuántos mensajes del historial recibe la ANOTACIÓN (P2).
+ *
+ * La conversación sigue viendo hasta 20: para responder hace falta el hilo
+ * completo. La extracción no — el dato aparece cuando el cliente lo dice, y
+ * arrastrar todo el historial encarece cada turno sin aportar. Se conservan los
+ * ÚLTIMOS mensajes, que son donde vive el dato recién dicho.
+ *
+ * MEDIDO (F9, sobre 129 turnos reales × 3 repeticiones): comparado contra el
+ * historial completo, este tope **no produce pérdida medible** en ningún campo.
+ * Los topes 6, 8 y 12 son indistinguibles entre sí, así que se elige el más
+ * barato. Ver `docs/bitacora-mejoras-llm.md`, fase F9.
+ */
+export const ANNOTATION_HISTORY_LIMIT = 6;
+
+/**
  * Ficha comercial del cliente ya capturada por el agente.
  *
  * Refleja las columnas de la tabla `contact` (`src/lib/db/schema.ts`): los
@@ -166,6 +182,42 @@ const CLIENT_FILE_FIELDS: readonly [string, keyof ClientFile][] = [
 ];
 
 /**
+ * Tope de LECTURA de las notas de la ficha (P6).
+ *
+ * `appendLeadNote` acumula una línea `[IA] …` por turno y las notas crecen sin
+ * techo en la base: sin tope, la ficha se come el prompt. El tope es de lectura,
+ * NO de escritura: la base sigue guardando todo.
+ */
+export const CLIENT_FILE_NOTES_MAX_CHARS = 1500;
+
+/** Marca visible de recorte, para que el modelo sepa que la lista está incompleta. */
+export const NOTES_TRUNCATED_MARK =
+  "[…se omitieron notas anteriores por longitud]";
+
+/**
+ * Recorta las notas conservando las MÁS RECIENTES.
+ *
+ * Las notas se acumulan en orden cronológico (`appendLeadNote` agrega al final),
+ * así que se conserva la cola. El corte busca un salto de línea para no partir
+ * una nota por la mitad; si no lo encuentra, corta igual. El resultado —marca
+ * incluida— nunca supera `max`. Determinista y sin LLM a propósito: resumir con
+ * el modelo costaría una llamada por turno y no sería reproducible.
+ */
+export function capNotes(
+  notes: string,
+  max: number = CLIENT_FILE_NOTES_MAX_CHARS
+): string {
+  const trimmed = notes.trim();
+  if (trimmed.length <= max) return trimmed;
+
+  const prefix = `${NOTES_TRUNCATED_MARK}\n`;
+  const tail = trimmed.slice(trimmed.length - (max - prefix.length));
+  const firstBreak = tail.indexOf("\n");
+  const kept = firstBreak === -1 ? tail : tail.slice(firstBreak + 1);
+  return `${prefix}${kept}`;
+}
+
+/**
  * Renderiza la ficha del cliente para inyectarla en el prompt del agente.
  *
  * Función PURA. Devuelve `null` cuando no hay ningún dato útil (ficha ausente o
@@ -173,6 +225,9 @@ const CLIENT_FILE_FIELDS: readonly [string, keyof ClientFile][] = [
  * respecto de no tener ficha. Cuando hay al menos un dato, devuelve el
  * encabezado más una viñeta por campo presente. No inventa valores ni rellena
  * con "sin datos": los campos ausentes simplemente se omiten.
+ *
+ * Sin notas, la salida es idéntica a la de antes del tope: `capNotes` devuelve
+ * el texto ya recortado de espacios y no agrega marca.
  */
 export function renderClientFile(
   ficha: ClientFile | null | undefined
@@ -181,10 +236,32 @@ export function renderClientFile(
   const lines = CLIENT_FILE_FIELDS.map(([label, key]) => {
     const raw = ficha[key];
     const value = typeof raw === "string" ? raw.trim() : raw;
-    return value ? `- ${label}: ${value}` : null;
+    if (!value) return null;
+    const text = key === "notes" ? capNotes(value) : value;
+    return `- ${label}: ${text}`;
   }).filter((line): line is string => line !== null);
   if (lines.length === 0) return null;
   return `${CLIENT_FILE_HEADER}\n${lines.join("\n")}`;
+}
+
+/**
+ * Línea de contexto temporal (P6). Va al FINAL del prompt, después de todo lo
+ * estable: es lo único que cambia en cada turno, así que ponerla al final deja
+ * el prefijo cacheable intacto.
+ *
+ * La zona horaria es un dato del negocio (`BUSINESS_TIMEZONE`); el formateo sale
+ * de Intl, así que respeta el horario de verano de la zona.
+ */
+export function renderTemporalContext(now: Date, timeZone: string): string {
+  const formatted = new Intl.DateTimeFormat("es-CL", {
+    timeZone,
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(now);
+  return (
+    `Fecha y hora actuales: ${formatted} (zona ${timeZone}). ` +
+    "Úselas para razonar sobre plazos y días de atención; no las repita salvo que el cliente pregunte por fechas."
+  );
 }
 
 /**
@@ -213,8 +290,9 @@ const CONTRATO_TECNICO: readonly string[] = [
  */
 const CONTRATO_ANOTACION: readonly string[] = [
   "Extraiga de la conversación SOLO los datos del lead que estén explícitos. Responda ÚNICAMENTE un objeto JSON:",
-  '- {"stage":"<etapa>","note":"...","empresa":"...","comuna":"...","rut":"...","razonSocial":"...","giro":"...","direccionFacturacion":"...","email":"...","frecuenciaDespacho":"...","volumenSemanal":"...","productoInteres":"...","formato":"..."}',
+  '- {"stage":"<etapa>","note":"...","empresa":"...","rubro":"...","comuna":"...","rut":"...","razonSocial":"...","giro":"...","direccionFacturacion":"...","email":"...","frecuenciaDespacho":"...","volumenSemanal":"...","productoInteres":"...","formato":"..."}',
   "Incluya solo los campos de los que tenga dato; lo ausente se omite. Si no hay nada que anotar, responda {}.",
+  'NUNCA escriba los marcadores del ejemplo ("...", "<etapa>", "N/A") como valor: son la FORMA del JSON, no datos.',
   'El campo "stage" usa el nombre EXACTO de una etapa de la lista de arriba. Escriba SOLO el nombre, sin la anotación entre paréntesis (ej.: "Cliente", nunca "Cliente (ganado)").',
   "Reglas de la etapa (importante):",
   "- El lead arranca en la primera etapa. Avance de etapa cuando el cliente avance en el proceso de compra.",
@@ -250,6 +328,7 @@ export const NIVEL_2_CONDUCTA_UNIVERSAL: readonly string[] = [
   "- Si el cliente pide que le mande la boleta, los datos de transferencia, un resumen o cualquier documento por correo/WhatsApp, indíquele que eso lo gestiona el equipo comercial y que usted no puede enviarlo. Nunca diga 'ya lo envié', 'revisé' ni 'quedó agendado'.",
   "- Solo puede afirmar lo que está en el conocimiento/catálogo o lo que el cliente le dijo. Ante la duda, no asegure: ofrezca confirmarlo con el equipo.",
   "- Si el cliente pide algo NO contemplado en el conocimiento (descuento, crédito, condición especial), no lo ofrezca ni lo niegue en seco: indíquele que un asesor puede evaluarlo y, si insiste, escale.",
+  `- Los mensajes marcados con ${HUMAN_ORIGIN_MARK} los escribió una persona del equipo, no usted: son parte de la conversación y el cliente ya los leyó. No los trate como suyos, no los repita ni los contradiga.`,
   "- Si el cliente pide hablar con una persona/humano/asesor → handoff.",
   "- Si la pregunta NO está cubierta por el conocimiento ni el catálogo → NO invente: responda que lo confirmará o escale.",
 ];
@@ -293,12 +372,21 @@ const FORMATO_DE_MENSAJES: readonly string[] = [
  * System prompt del agente (v1: inyecta el KB completo — el límite se
  * documenta con el contador de tamaño en la UI).
  *
- * Orden estable: identidad y configuración del negocio arriba; el bloque fijo de
- * reglas al final, en el orden CONTRATO_TECNICO → N1 → N2 → cierre → formato.
+ * ORDEN ESTABLE→DINÁMICO (P4a). El prompt se arma en dos tramos:
  *
- * Las etapas y la etapa actual llegan como CONTEXTO (otra fase): sirven para
- * conversar con el estado del lead a la vista. El contrato de SALIDA de este
- * prompt NO incluye campos del CRM — esos viven en `buildAnnotationSystemPrompt`.
+ *   1. PREFIJO ESTABLE (cacheable): identidad → tono → instrucciones →
+ *      escalado → saludo → conocimiento → catálogo → zonas → etapas →
+ *      reglas fijas (contrato → N1 → N2 → cierre → formato).
+ *   2. COLA DINÁMICA (cambia por turno): etapa actual → ficha del cliente →
+ *      fecha y hora.
+ *
+ * No reordenar esto sin medir: el proveedor cachea por PREFIJO, así que meter
+ * algo que cambia por turno dentro del tramo 1 hace que todo lo que sigue deje
+ * de coincidir y se pierda la caché. Lo que cambia va SIEMPRE al final.
+ *
+ * Las etapas llegan como CONTEXTO: sirven para conversar con el estado del lead
+ * a la vista. El contrato de SALIDA de este prompt NO incluye campos del CRM —
+ * esos viven en `buildAnnotationSystemPrompt`.
  */
 export function buildAgentSystemPrompt(input: {
   profile: AgentProfile;
@@ -308,6 +396,10 @@ export function buildAgentSystemPrompt(input: {
   catalog?: PublicProduct[];
   zones?: { comuna: string; costoDespacho: number | null }[];
   clientFile?: ClientFile | null;
+  /** Momento del turno; explícito para poder probar la línea temporal. */
+  now?: Date;
+  /** Zona horaria IANA del negocio (`BUSINESS_TIMEZONE`). */
+  timeZone?: string;
 }): string {
   const { profile } = input;
   const clientFileBlock = renderClientFile(input.clientFile);
@@ -341,9 +433,15 @@ export function buildAgentSystemPrompt(input: {
       ? `ZONAS DE ENVÍO (cobertura y costo de despacho al cliente):\n${renderDeliveryZones(input.zones)}`
       : null,
     `Etapas del pipeline (en orden): ${stageList}`,
+    // P4a — el bloque fijo de reglas sube ANTES de lo que cambia por turno. Es
+    // la sección más grande del prompt y no depende de la conversación: dejarla
+    // atrás de la etapa actual y la ficha hacía que el prefijo dejara de
+    // coincidir en cada turno y el proveedor no pudiera cachearlo.
+    reglasFijas,
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
     clientFileBlock,
-    reglasFijas,
+    // P6 — lo único que cambia minuto a minuto, al final del todo.
+    renderTemporalContext(input.now ?? new Date(), input.timeZone ?? "America/Santiago"),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -352,17 +450,31 @@ export function buildAgentSystemPrompt(input: {
 /**
  * System prompt de la llamada de ANOTACIÓN (segunda llamada del turno).
  *
- * RECORTE DELIBERADO: es extracción, no conversación. No incluye el catálogo, ni
- * las zonas de envío, ni la voz de marca (tono, saludo, reglas de escalado): para
- * reconocer datos del lead alcanza con las etapas, la etapa actual, las
- * instrucciones del negocio que los describen y el bloque `CONTRATO_ANOTACION`.
- * Por eso este prompt es notoriamente más chico que el de conversación, y no debe
- * "igualarse" agregándole contexto de conversación.
+ * QUÉ SE RECORTA Y QUÉ NO (P2, ajustado por medición):
+ *
+ * - NO se recorta el contexto del NEGOCIO. El plan proponía sacar las
+ *   instrucciones (≈3.000 caracteres) por considerarlas un prompt de
+ *   conversador. La medición sobre transcripts reales lo refutó: sin ellas el
+ *   agente deja de avanzar de etapa, y **17 de 39 conversaciones terminan en una
+ *   etapa distinta** (casi siempre más atrás). Las instrucciones también
+ *   describen el PROCESO COMERCIAL, y la etapa se juzga contra ese proceso. La
+ *   evidencia y los números están en `docs/bitacora-mejoras-llm.md`, fase F9.
+ *
+ * - SÍ se recorta el HISTORIAL (`ANNOTATION_HISTORY_LIMIT`): la extracción no
+ *   necesita el hilo completo, y es donde está el ahorro real.
+ *
+ * - SÍ se agrega el VOCABULARIO de productos (`renderCatalogVocabulary`), que
+ *   antes no estaba: medido, mejora la extracción de `productoInteres` y
+ *   `formato` de forma consistente (del orden de +12 a +19 pp).
+ *
+ * No incluye las zonas de envío ni la voz de marca (tono, saludo, reglas de
+ * escalado): eso sí es contexto de conversador.
  */
 export function buildAnnotationSystemPrompt(input: {
   profile: AgentProfile;
   stages: { name: string; kind?: string }[];
   currentStage?: string | null;
+  catalog?: PublicProduct[];
 }): string {
   const stageList = input.stages
     .map((s, i) => {
@@ -374,14 +486,51 @@ export function buildAnnotationSystemPrompt(input: {
   return [
     `${ANNOTATION_MARKER} Extraiga datos comerciales del lead de esta conversación. No redacte la respuesta al cliente.`,
     input.profile.instructions
-      ? `Instrucciones del negocio (referencia para reconocer los datos):\n${input.profile.instructions}`
+      ? `Instrucciones del negocio (referencia para reconocer los datos y juzgar el avance):\n${input.profile.instructions}`
       : null,
     `Etapas del pipeline (en orden): ${stageList}`,
     `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
+    input.catalog && input.catalog.length > 0
+      ? renderCatalogVocabulary(input.catalog)
+      : null,
     CONTRATO_ANOTACION.join("\n"),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * Vocabulario compacto del catálogo para la ANOTACIÓN (P2): nombres de producto
+ * con sus masas y formatos, agrupados por producto.
+ *
+ * SIN PRECIOS a propósito. La anotación extrae `productoInteres` y `formato`, no
+ * cotiza: incluir precios sería peso muerto y abriría la puerta a que la
+ * extracción opine sobre ellos. Se omite el catálogo vacío para que el prompt no
+ * cambie respecto de no tener productos.
+ */
+export function renderCatalogVocabulary(products: PublicProduct[]): string {
+  if (products.length === 0) return "";
+  const porProducto = new Map<string, { masas: Set<string>; formatos: Set<string> }>();
+  for (const p of products) {
+    const entry = porProducto.get(p.producto) ?? {
+      masas: new Set<string>(),
+      formatos: new Set<string>(),
+    };
+    if (p.masa) entry.masas.add(p.masa);
+    if (p.formato) entry.formatos.add(p.formato);
+    porProducto.set(p.producto, entry);
+  }
+  const lineas = [...porProducto.entries()].map(([producto, v]) => {
+    const partes = [
+      v.masas.size > 0 ? `masas ${[...v.masas].join(", ")}` : null,
+      v.formatos.size > 0 ? `formatos ${[...v.formatos].join(", ")}` : null,
+    ].filter(Boolean);
+    return `- ${producto}: ${partes.join("; ")}`;
+  });
+  return [
+    "PRODUCTOS DEL CATÁLOGO (vocabulario para reconocer el producto y el formato; SIN precios):",
+    ...lineas,
+  ].join("\n");
 }
 
 /** Prompt del juez del Laboratorio: UNA llamada por conversación (FR-032). */
@@ -404,8 +553,8 @@ export function buildJudgePrompt(input: {
   const system = [
     `${JUDGE_MARKER} Eres un evaluador de calidad independiente de agentes de WhatsApp. Evalúas UNA conversación simulada completa contra el conocimiento, el catálogo y el comportamiento configurados. Eres estricto: la alucinación (inventar datos que no están en las fuentes) es la falla más grave.`,
     "Respondes ÚNICAMENTE un objeto JSON con este esquema:",
-    '{"veredicto":"verde"|"amarillo"|"rojo","hallazgos":[{"tipo":"alucinacion"|"fuera_de_kb"|"debio_escalar"|"tono"|"afirmacion_sin_evidencia","evidencia":"cita textual del transcript","sugerencia":{"pregunta":"...","respuesta":"..."}}]}',
-    "- verde: sin problemas relevantes. amarillo: mejorable. rojo: falla grave.",
+    '{"hallazgos":[{"tipo":"alucinacion"|"fuera_de_kb"|"debio_escalar"|"tono"|"afirmacion_sin_evidencia","evidencia":"cita textual del transcript","sugerencia":{"pregunta":"...","respuesta":"..."}}]}',
+    "- NO elijas un veredicto: la severidad se deriva del TIPO de cada hallazgo. Tu trabajo es reportar hallazgos con evidencia; una lista vacía significa que no encontraste problemas.",
     "- `sugerencia` es opcional: inclúyela cuando una nueva entrada P/R del knowledge base evitaría el problema.",
     "- El CATÁLOGO y las ZONAS DE ENVÍO son la fuente de verdad de precios y cobertura: si el agente cita un precio o una comuna que coinciden con ellos, NO es alucinación.",
     "- Solo marques `alucinacion` si el agente afirmó datos concretos (precio, dirección, cobertura, producto) que NO están en el catálogo, las zonas, el conocimiento ni el comportamiento.",

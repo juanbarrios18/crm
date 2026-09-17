@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { stubAgentTurnEnv } from "./support/agent-turn-env";
 
 /**
  * El modelo chico suele devolver reply vacío y dejar al cliente colgado. El
@@ -90,14 +91,17 @@ describe("pipeline: corrección cuando la acción no trae respuesta", () => {
     inserts.length = 0;
     responses.length = 0;
     call = 0;
-    vi.stubEnv("OPENROUTER_API_TOKEN", "token-test");
+    stubAgentTurnEnv();
   });
 
   it("conversación sin texto → corrige y responde conservando la nota", async () => {
+    // El mock despacha por orden de INVOCACIÓN. Desde P1 la conversación y la
+    // anotación se lanzan en paralelo, así que el orden es: conversación,
+    // anotación, y recién después la corrección de la conversación.
     responses.push(
       { reply: "" }, // llamada 1 (conversación): sin texto
-      { reply: "Te paso los datos de transferencia." }, // corrección
-      { note: "quiere transferir", stage: "Interesado" } // llamada 2 (anotación)
+      { note: "quiere transferir", stage: "Interesado" }, // llamada 2 (anotación)
+      { reply: "Te paso los datos de transferencia." } // corrección
     );
 
     selectQueue.push(

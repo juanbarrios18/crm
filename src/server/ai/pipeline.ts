@@ -2,18 +2,21 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
 import { getEnv, isAiConfigured } from "@/lib/env";
-import { chatJson, type ChatMessage, type ChatTiming } from "@/lib/ai";
+import { chatJson, type ChatJsonResult, type ChatMessage, type ChatTiming } from "@/lib/ai";
 import { publish } from "@/server/events/bus";
 import { isWindowOpen } from "@/server/inbox/window";
 import { SendError, sendText } from "@/server/inbox/send";
 import {
   ConversationReply,
+  isPlaceholderValue,
   LeadExtraction,
   resolveStage,
   type LeadExtractionType,
 } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
+import { toConversationHistory } from "@/server/ai/history";
 import {
+  ANNOTATION_HISTORY_LIMIT,
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
   CLOSING_FAREWELL,
@@ -57,14 +60,22 @@ type TimedCall = {
 
 /**
  * Suma la telemetría de TODAS las llamadas del turno (conversación + corrección
- * opcional + anotación) en UN `ChatTiming`. Se suma a propósito: el turno hace
- * más de una llamada y el Laboratorio mide el costo/latencia REAL, no el de una
- * sola. `model` y `provider` son los de la llamada de conversación (la principal).
+ * opcional + anotación) en UN `ChatTiming`.
  *
- * Tokens: un `null` se trata como 0 SOLO si otra llamada reportó valor para ese
- * mismo token; si ninguna lo reporta, queda `null` (no se inventa un 0).
+ * Tokens: se SUMAN a propósito — el turno hace más de una llamada y el
+ * Laboratorio mide el costo REAL, no el de una sola. Un `null` se trata como 0
+ * SOLO si otra llamada reportó valor para ese mismo token; si ninguna lo
+ * reporta, queda `null` (no se inventa un 0).
+ *
+ * `model` y `provider` son los de la llamada de conversación, que SIEMPRE es
+ * `calls[0]`.
+ *
+ * Latencia: NO se suma. Desde P1 la conversación y la anotación corren en
+ * paralelo, así que la cifra honesta es el tiempo de pared del tramo paralelo
+ * (cuánto esperó realmente el cliente), que llega explícito en `latencyMs`.
+ * Sumar las dos llamadas reportaría una latencia que nadie experimentó.
  */
-function accumulateTiming(calls: TimedCall[]): ChatTiming {
+function accumulateTiming(calls: TimedCall[], latencyMs: number): ChatTiming {
   const sumToken = (
     pick: (u: NonNullable<TimedCall["usage"]>) => number | null
   ): number | null => {
@@ -79,12 +90,34 @@ function accumulateTiming(calls: TimedCall[]): ChatTiming {
   const primary = calls[0]!;
   return {
     model: primary.model,
-    latencyMs: calls.reduce((acc, call) => acc + call.latencyMs, 0),
+    latencyMs,
     promptTokens: sumToken((u) => u.promptTokens),
     completionTokens: sumToken((u) => u.completionTokens),
     cachedTokens: sumToken((u) => u.cachedTokens),
     provider: primary.provider,
   };
+}
+
+/**
+ * Consume la promesa de anotación garantizando que quede resuelta.
+ *
+ * La anotación es best-effort y `chatJson` no propaga excepción de proveedor
+ * (resultado `error` tipado), pero sí puede rechazar si el entorno es inválido
+ * (`getEnv` lanza). Una promesa rechazada sin manejar tumba el proceso en Node,
+ * así que todo camino de salida la consume a través de acá.
+ */
+async function settleAnnotation(
+  promise: Promise<ChatJsonResult<LeadExtractionType>>
+): Promise<ChatJsonResult<LeadExtractionType>> {
+  try {
+    return await promise;
+  } catch (err) {
+    return {
+      ok: false,
+      error: "provider_error",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 /** Punto de entrada con debounce (mensajes entrantes reales). */
@@ -255,21 +288,69 @@ export async function runAgentTurn(
         catalog,
         zones,
         clientFile,
+        now: new Date(),
+        timeZone: getEnv().BUSINESS_TIMEZONE,
       }),
     },
-    ...history
-      .filter((m) => m.text)
-      .map((m) => ({
-        role: m.direction === "in" ? ("user" as const) : ("assistant" as const),
-        content: m.text!,
-      })),
+    ...toConversationHistory(history),
   ];
 
-  // ── Llamada 1 — CONVERSACIÓN ──────────────────────────────────────────────
-  // El turno se parte en dos llamadas: esta produce SOLO el texto para el
-  // cliente; la anotación (más abajo) resuelve etapa y campos por separado.
-  const conversationResult = await chatJson(ConversationReply, messages);
+  // Mensajes de la anotación (llamada 2). Su ENTRADA no depende del reply de la
+  // conversación: solo del system de extracción y del historial. Por eso se arma
+  // ANTES y puede lanzarse en paralelo. La extracción de etapa y campos NUNCA
+  // puede tumbar la conversación: si falla, se registra un aviso y el turno
+  // entrega igual la respuesta.
+  //
+  // Historial ACOTADO (P2): la extracción no necesita el hilo completo. Se
+  // conservan los últimos `ANNOTATION_HISTORY_LIMIT` mensajes, que es donde vive
+  // el dato recién dicho.
+  //
+  // El historial va en modo `plain-assistant`: la marca de saliente humano la
+  // explica N2, que vive solo en el prompt de conversación. Acá es extracción
+  // pura y el marcador sería ruido sin explicación.
+  const annotationMessages: ChatMessage[] = [
+    {
+      role: "system",
+      content: buildAnnotationSystemPrompt({
+        profile,
+        stages,
+        currentStage: currentStage?.name ?? null,
+        catalog,
+      }),
+    },
+    ...toConversationHistory(history, { humanOutbound: "plain-assistant" }).slice(
+      -ANNOTATION_HISTORY_LIMIT
+    ),
+  ];
+
+  // ── Llamadas 1 y 2 EN PARALELO (P1) ───────────────────────────────────────
+  // El turno se parte en dos llamadas independientes: la conversación produce
+  // SOLO el texto para el cliente; la anotación resuelve etapa y campos. Al no
+  // depender una de la otra, corren juntas y el cliente deja de esperar la
+  // extracción. `turnStartedAt` mide el tramo paralelo completo.
+  const turnStartedAt = Date.now();
+  const conversationPromise = chatJson(ConversationReply, messages);
+  // La marca de tiempo se toma al RESOLVER la promesa, no al esperarla: si la
+  // anotación termina antes que la entrega, esperarla más tarde no debe inflar
+  // su latencia con el tiempo de esa espera.
+  let annotationDoneAt = 0;
+  // P2: la anotación puede usar su propio modelo (`OPENROUTER_ANNOTATION_MODEL`).
+  // Sin la variable, `chatJson` cae a OPENROUTER_MODEL como antes.
+  const annotationModel = getEnv().OPENROUTER_ANNOTATION_MODEL;
+  const annotationPromise = chatJson(LeadExtraction, annotationMessages, {
+    model: annotationModel,
+  }).then((result) => {
+    annotationDoneAt = Date.now();
+    return result;
+  });
+
+  const conversationResult = await conversationPromise;
+  let conversationDoneAt = Date.now();
+
   if (!conversationResult.ok) {
+    // La anotación ya está en vuelo: se consume SIEMPRE para no dejar la
+    // promesa sin manejo (y porque sus tokens ya se gastaron).
+    await settleAnnotation(annotationPromise);
     if (conversationResult.error === "not_configured") return null;
     // Fallo persistente del proveedor o salida imposible → escalar (FR-022).
     console.error(
@@ -308,6 +389,7 @@ export async function runAgentTurn(
           "para cualquier otra duda.",
       },
     ]);
+    conversationDoneAt = Date.now();
     if (corrective.ok) {
       timedCalls.push({
         model: corrective.model,
@@ -320,23 +402,22 @@ export async function runAgentTurn(
     }
   }
 
-  // ── Llamada 2 — ANOTACIÓN (best-effort) ───────────────────────────────────
-  // La extracción de etapa y campos NUNCA puede tumbar la conversación: si esta
-  // llamada falla, se registra un aviso y el turno sigue con la respuesta que ya
-  // se iba a entregar. Consulta solo las etapas y las instrucciones del negocio:
-  // es un prompt de extracción, notoriamente más chico que el de conversación.
-  const annotationMessages: ChatMessage[] = [
-    {
-      role: "system",
-      content: buildAnnotationSystemPrompt({
-        profile,
-        stages,
-        currentStage: currentStage?.name ?? null,
-      }),
-    },
-    ...messages.slice(1),
-  ];
-  const extraction = await chatJson(LeadExtraction, annotationMessages);
+  // ── Entrega ───────────────────────────────────────────────────────────────
+  // Ocurre SIN esperar la anotación (P1): el cliente recibe su respuesta con el
+  // máximo de las dos llamadas, no con la suma.
+  if (wantsHandoff) {
+    // El agente SIEMPRE cierra cordialmente: sin texto, usa el cierre determinista.
+    await deliverReply(conversation, reply || CLOSING_FAREWELL);
+    await applyHandoff(conversationId, organizationId, "modelo");
+  } else if (reply) {
+    await deliverReply(conversation, reply);
+  }
+
+  // ── Anotación: se espera DESPUÉS de la entrega (P1) ───────────────────────
+  // Etapa y nota se procesan igual que antes; el turno no retorna hasta
+  // cerrarlas para que el Laboratorio mida el `finalStage` completo
+  // (runner.ts:396) y la telemetría incluya las dos llamadas.
+  const extraction = await settleAnnotation(annotationPromise);
   if (!extraction.ok) {
     console.warn(
       `[agente] extracción del lead falló, el turno continúa: ${extraction.detail}`
@@ -381,20 +462,13 @@ export async function runAgentTurn(
     await appendLeadNote(organizationId, conversation.contactId, extraction.data);
   }
 
-  // Timing del turno: suma REAL de todas las llamadas que ocurrieron (Laboratorio).
-  const timing = accumulateTiming(timedCalls);
-
-  // ── Entrega ───────────────────────────────────────────────────────────────
-  if (wantsHandoff) {
-    // El agente SIEMPRE cierra cordialmente: sin texto, usa el cierre determinista.
-    await deliverReply(conversation, reply || CLOSING_FAREWELL);
-    await applyHandoff(conversationId, organizationId, "modelo");
-    return timing;
-  }
-  if (reply) {
-    await deliverReply(conversation, reply);
-  }
-  return timing;
+  // Latencia del turno: tiempo de pared del tramo paralelo (P1). Si la
+  // anotación no llegó a marcar hora (caso imposible: siempre resuelve), se cae
+  // al cierre de la conversación para no reportar un valor sin sentido.
+  const latencyMs =
+    Math.max(conversationDoneAt, annotationDoneAt || conversationDoneAt) -
+    turnStartedAt;
+  return accumulateTiming(timedCalls, latencyMs);
 }
 
 type Conversation = typeof schema.conversation.$inferSelect;
@@ -505,10 +579,13 @@ async function appendLeadNote(
     "productoInteres",
     "formato",
   ] as const;
+  // Un marcador de posición ("...") no es un dato: se descarta en vez de
+  // escribirlo en el contacto (ver `isPlaceholderValue`).
   const hasStructuredField = fieldKeys.some(
-    (key) => fields[key] !== undefined
+    (key) => fields[key] !== undefined && !isPlaceholderValue(fields[key])
   );
-  if (fields.note === undefined && !hasStructuredField) return;
+  const note = isPlaceholderValue(fields.note) ? undefined : fields.note;
+  if (note === undefined && !hasStructuredField) return;
 
   const db = getDb();
 
@@ -536,18 +613,20 @@ async function appendLeadNote(
   if (!contact) return;
 
   // Último valor gana: cada campo estructurado presente en la extracción
-  // sobrescribe el valor previo; lo ausente se conserva.
+  // sobrescribe el valor previo; lo ausente se conserva. Los marcadores de
+  // posición se descartan igual que lo ausente.
   const patch: Partial<typeof schema.contact.$inferInsert> = {};
   for (const key of fieldKeys) {
-    if (fields[key] !== undefined) {
-      patch[key] = fields[key];
+    const value = fields[key];
+    if (value !== undefined && !isPlaceholderValue(value)) {
+      patch[key] = value;
     }
   }
 
-  const notes = fields.note
+  const notes = note
     ? contact.notes
-      ? `${contact.notes}\n[IA] ${fields.note}`
-      : `[IA] ${fields.note}`
+      ? `${contact.notes}\n[IA] ${note}`
+      : `[IA] ${note}`
     : contact.notes;
 
   await db

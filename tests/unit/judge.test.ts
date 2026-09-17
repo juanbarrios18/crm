@@ -10,9 +10,65 @@ import {
   compactTranscript,
   computeDispersion,
   computeScore,
+  deriveVerdict,
   judgeCase,
+  type Hallazgo,
 } from "@/server/lab/judge";
 import { buildJudgePrompt } from "@/server/ai/prompts";
+
+/**
+ * P10 — el veredicto se DERIVA del tipo de hallazgo (tabla B2, aprobada por el
+ * dueño el 2026-09-17). Antes lo elegía el juez, que podía declarar "verde"
+ * teniendo un hallazgo grave: el instrumento se contradecía a sí mismo.
+ */
+describe("deriveVerdict (P10, tabla B2)", () => {
+  const h = (tipo: Hallazgo["tipo"]): Hallazgo => ({
+    tipo,
+    evidencia: "cita textual",
+  });
+
+  it("sin hallazgos → verde", () => {
+    expect(deriveVerdict([])).toBe("verde");
+  });
+
+  it.each([
+    "alucinacion",
+    "afirmacion_sin_evidencia",
+    "debio_escalar",
+  ] as const)("%s → rojo", (tipo) => {
+    expect(deriveVerdict([h(tipo)])).toBe("rojo");
+  });
+
+  it.each(["fuera_de_kb", "tono"] as const)("%s → amarillo", (tipo) => {
+    expect(deriveVerdict([h(tipo)])).toBe("amarillo");
+  });
+
+  it("una alucinacion NUNCA puede dar verde, ni sola ni acompañada", () => {
+    expect(deriveVerdict([h("alucinacion")])).not.toBe("verde");
+    expect(deriveVerdict([h("fuera_de_kb"), h("alucinacion")])).not.toBe("verde");
+    expect(deriveVerdict([h("tono"), h("alucinacion"), h("debio_escalar")])).toBe(
+      "rojo"
+    );
+  });
+
+  it("el rojo gana sobre el amarillo sin importar el orden", () => {
+    expect(deriveVerdict([h("alucinacion"), h("tono")])).toBe("rojo");
+    expect(deriveVerdict([h("tono"), h("alucinacion")])).toBe("rojo");
+    expect(deriveVerdict([h("tono"), h("fuera_de_kb")])).toBe("amarillo");
+  });
+
+  it("es determinista: el mismo conjunto da el mismo veredicto", () => {
+    const hallazgos = [h("tono"), h("fuera_de_kb")];
+    expect(deriveVerdict(hallazgos)).toBe(deriveVerdict([...hallazgos]));
+  });
+
+  it("un tipo no clasificado degrada hacia arriba, nunca a verde", () => {
+    // Escenario defensivo: si el juez devolviera un tipo que la tabla no conoce,
+    // el veredicto no puede quedar en verde.
+    const desconocido = [{ tipo: "tipo_futuro" }] as unknown as Hallazgo[];
+    expect(deriveVerdict(desconocido)).not.toBe("verde");
+  });
+});
 
 describe("judgeCase (FR-032)", () => {
   beforeEach(() => chatJson.mockReset());
@@ -20,7 +76,7 @@ describe("judgeCase (FR-032)", () => {
   it("veredicto válido → done con modelo y latencia del juez", async () => {
     chatJson.mockResolvedValue({
       ok: true,
-      data: { veredicto: "verde", hallazgos: [] },
+      data: { hallazgos: [] },
       raw: "{}",
       model: "juez-test",
       latencyMs: 432,
@@ -40,6 +96,57 @@ describe("judgeCase (FR-032)", () => {
     }
     // usa el modelo del juez (opts.judge)
     expect(chatJson.mock.calls[0]![2]).toMatchObject({ judge: true });
+  });
+
+  it("lo que devuelve el juez se convierte en veredicto DERIVADO (P10)", async () => {
+    chatJson.mockResolvedValue({
+      ok: true,
+      data: {
+        hallazgos: [
+          { tipo: "alucinacion", evidencia: "dijo que ya envió la boleta" },
+        ],
+      },
+      raw: "{}",
+      model: "juez-test",
+      latencyMs: 10,
+    });
+
+    const outcome = await judgeCase({
+      personaKey: "reclama_no_recibido",
+      transcript: [{ role: "cliente", text: "no me llegó" }],
+      kbText: "",
+      behaviorText: "",
+      catalogText: "",
+      zonesText: "",
+    });
+
+    expect(outcome.status).toBe("done");
+    if (outcome.status === "done") {
+      expect(outcome.hallazgos).toHaveLength(1);
+      expect(outcome.veredicto).toBe("rojo");
+    }
+  });
+
+  it("sin hallazgos el veredicto derivado es verde", async () => {
+    chatJson.mockResolvedValue({
+      ok: true,
+      data: { hallazgos: [] },
+      raw: "{}",
+      model: "juez-test",
+      latencyMs: 10,
+    });
+
+    const outcome = await judgeCase({
+      personaKey: "comprador_decidido",
+      transcript: [],
+      kbText: "",
+      behaviorText: "",
+      catalogText: "",
+      zonesText: "",
+    });
+
+    expect(outcome.status).toBe("done");
+    if (outcome.status === "done") expect(outcome.veredicto).toBe("verde");
   });
 
   it("salida inválida tras reintentos internos → judge_failed (no lanza)", async () => {
@@ -68,7 +175,7 @@ describe("judgeCase (FR-032)", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        data: { veredicto: "verde", hallazgos: [] },
+        data: { hallazgos: [] },
         raw: "{}",
         model: "juez-test",
         latencyMs: 10,
@@ -121,6 +228,23 @@ describe("compactTranscript", () => {
 });
 
 describe("buildJudgePrompt (ground truth del juez)", () => {
+  it("ya no le pide un veredicto: solo hallazgos (P10)", () => {
+    const { system } = buildJudgePrompt({
+      persona: "comprador_decidido",
+      transcript: [],
+      kbText: "",
+      behaviorText: "",
+      catalogText: "",
+      zonesText: "",
+    });
+    // La instrucción de elegir veredicto se eliminó del prompt: pedirla y
+    // ignorarla dejaría al modelo razonando sobre algo que ya no decide.
+    expect(system).not.toContain('"veredicto"');
+    expect(system).not.toContain("amarillo");
+    expect(system).toContain("NO elijas un veredicto");
+    expect(system).toContain('"hallazgos"');
+  });
+
   it("incluye catálogo y zonas como fuente de verdad", () => {
     const { user } = buildJudgePrompt({
       persona: "comprador_decidido",

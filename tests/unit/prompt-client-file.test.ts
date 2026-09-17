@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentSystemPrompt,
+  capNotes,
   CLIENT_FILE_HEADER,
+  CLIENT_FILE_NOTES_MAX_CHARS,
+  NOTES_TRUNCATED_MARK,
   renderClientFile,
   type ClientFile,
 } from "@/server/ai/prompts";
@@ -29,11 +32,20 @@ const PROFILE = {
 
 const STAGES = [{ name: "Nuevo" }, { name: "Calificado" }, { name: "Ganado" }];
 
+/**
+ * Momento fijo: el prompt incluye una línea con la fecha y hora del turno, así
+ * que un `new Date()` real haría que dos builds del mismo caso difieran si el
+ * reloj cruza el minuto entre uno y otro.
+ */
+const FIXED_NOW = new Date("2026-09-17T15:30:00Z");
+
 function build(input: Partial<Parameters<typeof buildAgentSystemPrompt>[0]> = {}) {
   return buildAgentSystemPrompt({
     profile: PROFILE,
     kb: [],
     stages: STAGES,
+    now: FIXED_NOW,
+    timeZone: "America/Santiago",
     ...input,
   });
 }
@@ -166,13 +178,134 @@ describe("buildAgentSystemPrompt con ficha del cliente", () => {
     expect(prompt).toContain("- Correo: compras@lamas.cl");
   });
 
-  it("ubica el bloque después de la etapa actual y antes de las reglas fijas", () => {
+  it("ubica la ficha en la COLA dinámica, después de todo lo estable (P4a)", () => {
     const prompt = build({ clientFile: { name: "Ana" } });
-    const stageAt = prompt.indexOf("Etapa actual del lead:");
+    // Lo estable va primero y de forma contigua; el proveedor cachea por
+    // prefijo, así que si algo que cambia por turno se cuela antes, se pierde
+    // la caché de todo lo que sigue.
+    const estable = [
+      'Usted es "Asistente comercial"',
+      "Tono:",
+      "Instrucciones del negocio:",
+      "Reglas de escalado a humano:",
+      "CONOCIMIENTO DEL NEGOCIO",
+      "CATÁLOGO DE PRODUCTOS",
+      "ZONAS DE ENVÍO",
+      "Etapas del pipeline",
+      "En cada turno responde ÚNICAMENTE", // bloque fijo de reglas
+    ];
+    const dinamico = [
+      "Etapa actual del lead:",
+      CLIENT_FILE_HEADER,
+      "Fecha y hora actuales:",
+    ];
+
+    const lastEstable = Math.max(...estable.map((s) => prompt.indexOf(s)));
+    const firstDinamico = Math.min(...dinamico.map((s) => prompt.indexOf(s)));
+    expect(lastEstable).toBeGreaterThanOrEqual(0);
+    expect(lastEstable).toBeLessThan(firstDinamico);
+
+    // Y dentro de la cola dinámica se conserva el orden.
+    const etapaAt = prompt.indexOf("Etapa actual del lead:");
     const fichaAt = prompt.indexOf(CLIENT_FILE_HEADER);
+    const fechaAt = prompt.indexOf("Fecha y hora actuales:");
+    expect(etapaAt).toBeLessThan(fichaAt);
+    expect(fichaAt).toBeLessThan(fechaAt);
+  });
+
+  it("el bloque de reglas fijas queda ANTES de la etapa actual y de la ficha (P4a)", () => {
+    const prompt = build({ clientFile: { name: "Ana" } });
     const rulesAt = prompt.indexOf("En cada turno responde ÚNICAMENTE");
-    expect(stageAt).toBeGreaterThanOrEqual(0);
-    expect(fichaAt).toBeGreaterThan(stageAt);
-    expect(rulesAt).toBeGreaterThan(fichaAt);
+    expect(rulesAt).toBeGreaterThanOrEqual(0);
+    expect(rulesAt).toBeLessThan(prompt.indexOf("Etapa actual del lead:"));
+    expect(rulesAt).toBeLessThan(prompt.indexOf(CLIENT_FILE_HEADER));
+  });
+});
+
+/**
+ * P6 — tope de LECTURA de las notas. `appendLeadNote` acumula una línea por
+ * turno y las notas crecen sin techo en la base: sin tope, con el tiempo la
+ * ficha se come el prompt. El tope NO toca la escritura.
+ */
+describe("capNotes (P6)", () => {
+  it("no toca un texto que cabe en el tope", () => {
+    const notes = "[IA] Consultó por pan de hamburguesa.";
+    expect(capNotes(notes)).toBe(notes);
+    expect(capNotes(notes)).not.toContain(NOTES_TRUNCATED_MARK);
+  });
+
+  it("recorta espacios sobrantes sin agregar marca", () => {
+    expect(capNotes("  [IA] algo  ")).toBe("[IA] algo");
+  });
+
+  it("con 30 notas conserva las MÁS RECIENTES y no supera el tope", () => {
+    // Notas de largo realista (~70 caracteres): 30 de ellas superan el tope.
+    const notes = Array.from(
+      { length: 30 },
+      (_, i) => `[IA] nota numero ${i + 1}: consulto por despacho y precios`
+    ).join("\n");
+    const capped = capNotes(notes);
+
+    expect(notes.length).toBeGreaterThan(CLIENT_FILE_NOTES_MAX_CHARS);
+    expect(capped.length).toBeLessThanOrEqual(CLIENT_FILE_NOTES_MAX_CHARS);
+    expect(capped).toContain(NOTES_TRUNCATED_MARK);
+    // La última nota siempre sobrevive: es la más reciente.
+    expect(capped).toContain("nota numero 30:");
+    // La primera ya no está.
+    expect(capped).not.toContain("nota numero 1:");
+  });
+
+  it("corta en un salto de línea, sin partir una nota por la mitad", () => {
+    const notes = Array.from(
+      { length: 200 },
+      (_, i) => `[IA] nota ${i + 1}`
+    ).join("\n");
+    const capped = capNotes(notes);
+    const body = capped.slice(NOTES_TRUNCATED_MARK.length + 1);
+    // El cuerpo arranca en el inicio de una nota, no a mitad de una.
+    expect(body.startsWith("[IA] nota ")).toBe(true);
+  });
+
+  it("es determinista: el mismo texto da el mismo recorte", () => {
+    const notes = Array.from({ length: 100 }, (_, i) => `[IA] n${i}`).join("\n");
+    expect(capNotes(notes)).toBe(capNotes(notes));
+  });
+});
+
+describe("buildAgentSystemPrompt con notas extensas (P6)", () => {
+  it("la ficha no supera el tope aunque la base tenga 30 notas", () => {
+    const notes = Array.from(
+      { length: 30 },
+      (_, i) => `[IA] nota numero ${i + 1}: consulto por despacho y precios`
+    ).join("\n");
+    const prompt = build({
+      profile: { ...PROFILE, instructions: "x" },
+      clientFile: { name: "Ana", notes },
+    });
+    // La ficha va del encabezado hasta la línea temporal, que cierra el prompt.
+    const start = prompt.indexOf(CLIENT_FILE_HEADER);
+    const end = prompt.indexOf("Fecha y hora actuales:");
+    const block = prompt.slice(start, end);
+    expect(block).toContain(NOTES_TRUNCATED_MARK);
+    expect(block).toContain("nota numero 30:");
+    expect(block).not.toContain("nota numero 1:");
+    expect(block.length).toBeLessThan(CLIENT_FILE_NOTES_MAX_CHARS + 200);
+    // Y el prompt SIN tope habría sido notoriamente más grande.
+    expect(prompt).not.toContain("nota numero 1:");
+  });
+
+  it("sin notas la ficha es idéntica a la de antes del tope", () => {
+    expect(renderClientFile({ name: "Ana", notes: null })).toBe(
+      `${CLIENT_FILE_HEADER}\n- Nombre: Ana`
+    );
+    expect(renderClientFile({ name: "Ana", notes: "   " })).toBe(
+      `${CLIENT_FILE_HEADER}\n- Nombre: Ana`
+    );
+  });
+
+  it("con notas cortas la ficha conserva el texto tal cual", () => {
+    expect(renderClientFile({ notes: "[IA] pidió despacho a Macul" })).toBe(
+      `${CLIENT_FILE_HEADER}\n- Notas previas: [IA] pidió despacho a Macul`
+    );
   });
 });

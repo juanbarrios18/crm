@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 import {
   NIVEL_1_VERDAD_DEL_SISTEMA,
   NIVEL_2_CONDUCTA_UNIVERSAL,
@@ -83,9 +84,16 @@ const { GET } = await import("@/app/api/agent/prompt/route");
 
 beforeEach(() => {
   selectQueue.length = 0;
+  // El route arma el prompt EFECTIVO: `getEnv` valida el entorno real.
+  vi.stubEnv("APP_BASE_URL", "http://localhost:3000");
+  vi.stubEnv("DATABASE_URL", "postgresql://t:t@localhost:5432/t");
+  vi.stubEnv("BETTER_AUTH_SECRET", "secret-de-test-suficiente");
+  vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 3).toString("base64"));
+  vi.stubEnv("META_WEBHOOK_VERIFY_TOKEN", "verify-test");
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -155,6 +163,28 @@ describe("summarizeRules", () => {
       changed.some((group) => group.topic === "Escalamiento a una persona")
     ).toBe(false);
   });
+
+  it("la marca de saliente humano no cae en el grupo de escalado (P5)", () => {
+    const groups = summarizeRules(
+      NIVEL_1_VERDAD_DEL_SISTEMA,
+      NIVEL_2_CONDUCTA_UNIVERSAL
+    );
+    const markRule = NIVEL_2_CONDUCTA_UNIVERSAL.find((rule) =>
+      rule.includes(HUMAN_ORIGIN_MARK)
+    );
+    expect(markRule).toBeDefined();
+
+    // La regla habla de mensajes escritos por personas del equipo, no de cuándo
+    // escalar: mencionar "una persona del equipo" no debe mandarla al grupo de
+    // escalado.
+    expect(
+      groups.find((group) => group.topic === "Escalamiento a una persona")?.rules
+    ).not.toContain(markRule);
+    expect(
+      groups.find((group) => group.topic === "Mensajes de personas del equipo")
+        ?.rules
+    ).toContain(markRule);
+  });
 });
 
 describe("GET /api/agent/prompt", () => {
@@ -181,5 +211,33 @@ describe("GET /api/agent/prompt", () => {
     expect(json.effectivePrompt).toContain("NO envía correos");
     expect(json.effectivePrompt).toContain(PROFILE_ROW.name);
     expect(json.clientFileNote.length).toBeGreaterThan(0);
+  });
+
+  it("el prompt efectivo respeta el orden estable→dinámico (P4a)", async () => {
+    selectQueue.push(
+      [PROFILE_ROW],
+      [], // knowledge base
+      [{ id: "stg_1", name: "Nuevo", position: 0, kind: "open" }]
+    );
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { effectivePrompt: string };
+    const prompt = json.effectivePrompt;
+
+    // El tramo estable (que el proveedor puede cachear) va antes que todo lo que
+    // cambia por turno. Si el bloque de reglas volviera detrás de la etapa
+    // actual, la caché de prefijo se perdería en cada turno.
+    const reglasAt = prompt.indexOf("En cada turno responde ÚNICAMENTE");
+    const etapasAt = prompt.indexOf("Etapas del pipeline");
+    const etapaActualAt = prompt.indexOf("Etapa actual del lead:");
+    const fechaAt = prompt.indexOf("Fecha y hora actuales:");
+
+    expect(etapasAt).toBeGreaterThan(0);
+    expect(reglasAt).toBeGreaterThan(etapasAt);
+    expect(etapaActualAt).toBeGreaterThan(reglasAt);
+    expect(fechaAt).toBeGreaterThan(etapaActualAt);
+    // La línea temporal cierra el prompt: es la última sección.
+    expect(fechaAt).toBe(prompt.lastIndexOf("\n\n") + 2);
   });
 });
