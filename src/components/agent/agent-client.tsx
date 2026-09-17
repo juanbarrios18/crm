@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { summarizeRules } from "@/server/ai/rule-summary";
 
 type Profile = {
   enabled: boolean;
@@ -24,6 +25,12 @@ type KbEntry = {
   question: string | null;
   answer: string | null;
   content: string | null;
+};
+
+type PromptPayload = {
+  rules: { nivel1: string[]; nivel2: string[] };
+  effectivePrompt: string;
+  clientFileNote: string;
 };
 
 export function AgentClient() {
@@ -101,11 +108,11 @@ export function AgentClient() {
       {!aiConfigured && (
         <div className="mx-6 mt-6 rounded-lg border border-brand-soft bg-brand-tint p-6 text-center">
           <Sparkles className="mx-auto mb-2 h-8 w-8 text-primary" />
-          <p className="font-medium">Configura tu proveedor de IA para activar el agente</p>
+          <p className="font-medium">Configure su proveedor de IA para activar el agente</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            Agrega <code className="rounded bg-secondary px-1">OPENROUTER_API_TOKEN</code> y{" "}
+            Agregue <code className="rounded bg-secondary px-1">OPENROUTER_API_TOKEN</code> y{" "}
             <code className="rounded bg-secondary px-1">OPENROUTER_MODEL</code> a las variables
-            de entorno de la instancia y reiníciala. Mientras tanto puedes dejar listo el
+            de entorno de la instancia y reiníciela. Mientras tanto puede dejar listo el
             comportamiento y el conocimiento aquí abajo.
           </p>
         </div>
@@ -114,6 +121,10 @@ export function AgentClient() {
       <div className="grid gap-6 p-6 lg:grid-cols-2">
         <ProfileSection profile={profile} onSave={saveProfile} />
         <KbSection entries={entries} kbSize={kbSize} onChanged={() => void refetch()} />
+      </div>
+
+      <div className="px-6 pb-6">
+        <RulesSection />
       </div>
     </div>
   );
@@ -134,56 +145,92 @@ function ProfileSection({
       <CardHeader>
         <CardTitle>Comportamiento</CardTitle>
         <CardDescription>
-          Cómo se presenta y actúa el agente al responder a tus clientes.
+          Cómo se presenta y actúa el agente al responder a sus clientes.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="agent-name">Nombre del agente</Label>
-          <Input
-            id="agent-name"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Identidad y tono
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="agent-name">Nombre del agente</Label>
+            <Input
+              id="agent-name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="agent-tone">Tono</Label>
+            <Input
+              id="agent-tone"
+              placeholder="p. ej. cercano y directo, con usted"
+              value={form.tone ?? ""}
+              onChange={(e) => setForm({ ...form, tone: e.target.value })}
+            />
+            {!form.tone && (
+              <p className="text-xs text-muted-foreground">Sin configurar</p>
+            )}
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="agent-tone">Tono</Label>
-          <Input
-            id="agent-tone"
-            placeholder="p. ej. cercano y directo, con usted"
-            value={form.tone ?? ""}
-            onChange={(e) => setForm({ ...form, tone: e.target.value })}
-          />
+
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Instrucciones
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="agent-instructions">Instrucciones</Label>
+            <Textarea
+              id="agent-instructions"
+              rows={5}
+              placeholder="Qué debe y no debe hacer el agente…"
+              value={form.instructions ?? ""}
+              onChange={(e) => setForm({ ...form, instructions: e.target.value })}
+            />
+            {!form.instructions && (
+              <p className="text-xs text-muted-foreground">Sin configurar</p>
+            )}
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="agent-instructions">Instrucciones</Label>
-          <Textarea
-            id="agent-instructions"
-            rows={5}
-            placeholder="Qué debe y no debe hacer el agente…"
-            value={form.instructions ?? ""}
-            onChange={(e) => setForm({ ...form, instructions: e.target.value })}
-          />
+
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Escalado
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="agent-escalation">Reglas de escalado</Label>
+            <Textarea
+              id="agent-escalation"
+              rows={3}
+              placeholder="Cuándo pasar la conversación a un humano…"
+              value={form.escalationRules ?? ""}
+              onChange={(e) => setForm({ ...form, escalationRules: e.target.value })}
+            />
+            {!form.escalationRules && (
+              <p className="text-xs text-muted-foreground">Sin configurar</p>
+            )}
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="agent-escalation">Reglas de escalado</Label>
-          <Textarea
-            id="agent-escalation"
-            rows={3}
-            placeholder="Cuándo pasar la conversación a un humano…"
-            value={form.escalationRules ?? ""}
-            onChange={(e) => setForm({ ...form, escalationRules: e.target.value })}
-          />
+
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Saludo
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="agent-greeting">Saludo</Label>
+            <Input
+              id="agent-greeting"
+              placeholder="Saludo para conversaciones nuevas"
+              value={form.greeting ?? ""}
+              onChange={(e) => setForm({ ...form, greeting: e.target.value })}
+            />
+            {!form.greeting && (
+              <p className="text-xs text-muted-foreground">Sin configurar</p>
+            )}
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="agent-greeting">Saludo</Label>
-          <Input
-            id="agent-greeting"
-            placeholder="Saludo para conversaciones nuevas"
-            value={form.greeting ?? ""}
-            onChange={(e) => setForm({ ...form, greeting: e.target.value })}
-          />
-        </div>
+
         <Button onClick={() => void onSave(form)}>Guardar comportamiento</Button>
       </CardContent>
     </Card>
@@ -251,7 +298,7 @@ function KbSection({
         {kbSize?.warning && (
           <p className="text-xs text-[#8a6d3b]">
             El conocimiento se acerca al límite del contexto del modelo (v1 lo
-            inyecta completo en cada turno). Considera depurar entradas.
+            inyecta completo en cada turno). Considere depurar entradas.
           </p>
         )}
       </CardHeader>
@@ -316,10 +363,101 @@ function KbSection({
           ))}
           {entries.length === 0 && (
             <p className="py-2 text-center text-xs text-muted-foreground">
-              Sin entradas todavía: agrega lo que el agente debe saber.
+              Sin entradas todavía: agregue lo que el agente debe saber.
             </p>
           )}
         </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RulesSection() {
+  const [data, setData] = useState<PromptPayload | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/agent/prompt")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: PromptPayload | null) => {
+        if (active && json) setData(json);
+        else if (active) setFailed(true);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const groups = data ? summarizeRules(data.rules.nivel1, data.rules.nivel2) : [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Reglas del agente</CardTitle>
+        <CardDescription>
+          Reglas fijas del producto que el agente respeta en cada respuesta,
+          agrupadas por tema. La configuración del negocio nunca puede
+          contradecirlas.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {failed && (
+          <p className="text-sm text-muted-foreground">
+            No se pudo cargar el resumen de reglas.
+          </p>
+        )}
+        {!data && !failed && (
+          <p className="text-sm text-muted-foreground">Cargando…</p>
+        )}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {groups.map((group) => (
+            <div key={group.topic} className="space-y-1">
+              <p className="text-sm font-medium">{group.topic}</p>
+              <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+                {group.rules.map((rule, index) => (
+                  <li key={`${group.topic}-${index}`}>{rule}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+          >
+            {open ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+            Ver qué recibe el agente
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            {data
+              ? data.clientFileNote
+              : "Vista previa del prompt base con los datos de esta instancia."}
+          </p>
+          {open && data && (
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-secondary p-3 font-mono text-xs">
+              {data.effectivePrompt}
+            </pre>
+          )}
+          {open && failed && (
+            <p className="text-sm text-muted-foreground">
+              No se pudo cargar el prompt.
+            </p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
