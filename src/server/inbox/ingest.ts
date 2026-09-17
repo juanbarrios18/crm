@@ -17,6 +17,11 @@ import {
   type ResolvedIdentity,
 } from "@/server/inbox/identity";
 import { applyStatusUpdate } from "@/server/inbox/status";
+import {
+  captureAttribution,
+  parseReferral,
+  type AttributionReferral,
+} from "@/server/inbox/attribution";
 import { onLeadActivity } from "@/server/inbox/lead-activity";
 import { serializeMessage } from "@/server/inbox/serialize";
 import { sendText } from "@/server/inbox/send";
@@ -266,6 +271,9 @@ export async function processMessagesValue(value: WebhookValue): Promise<void> {
       text: msg.text?.body ?? null,
       timestamp: msg.timestamp,
       media: mediaInputFrom(msg),
+      // El referral adjunto al anuncio de clic a WhatsApp se interpreta aquí y
+      // se persiste dentro del flujo; la interpretación nunca lanza.
+      referral: parseReferral(msg.referral),
     });
   }
 }
@@ -397,6 +405,8 @@ export async function ingestInboundMessage(input: {
   text: string | null;
   timestamp: string;
   media?: MediaInput | null;
+  /** Atribución del anuncio de clic a WhatsApp, si el mensaje la trae. */
+  referral?: AttributionReferral | null;
 }): Promise<void> {
   const db = getDb();
   const { organizationId } = input;
@@ -430,6 +440,13 @@ export async function ingestInboundMessage(input: {
     .returning();
   const message = inserted[0];
   if (!message) return; // duplicado
+
+  // Atribución del anuncio: se escribe DESPUÉS del guard de idempotencia, así
+  // que un reenvío del mismo wa_message_id no vuelve a tocar la conversación.
+  // Primera gana: captureAttribution no sobrescribe una atribución existente.
+  if (input.referral) {
+    await captureAttribution(organizationId, conversation.id, input.referral);
+  }
 
   const asset = input.media
     ? await attachMediaAsset(organizationId, message.id, input.media)

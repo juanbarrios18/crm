@@ -210,6 +210,19 @@ export const conversation = pgTable(
     lastInboundAt: timestamp("last_inbound_at"),
     lastMessageAt: timestamp("last_message_at"),
     unreadCount: integer("unread_count").notNull().default(0),
+    // Atribución del anuncio de clic a WhatsApp (referral). El referral llega
+    // UNA sola vez, en el primer mensaje de la conversación, así que vive en la
+    // conversación y no en el contacto.
+    /** referral.source_id: identificador del anuncio de Meta. */
+    attributionSourceId: text("attribution_source_id"),
+    /** referral.ctwa_clid: identificador del clic en el anuncio. */
+    attributionCtwaClid: text("attribution_ctwa_clid"),
+    /** referral.headline: titular del anuncio. */
+    attributionHeadline: text("attribution_headline"),
+    /** referral.source_url: URL de origen del anuncio. */
+    attributionSourceUrl: text("attribution_source_url"),
+    /** Momento de la captura; NULL indica que la conversación aún no tiene atribución. */
+    attributionCapturedAt: timestamp("attribution_captured_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
