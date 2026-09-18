@@ -10,6 +10,7 @@ import {
   renderCatalog,
   renderDeliveryZones,
   renderTemporalContext,
+  renderAnnotationTurnState,
   renderTemporalNote,
 } from "@/server/ai/prompts";
 
@@ -181,7 +182,8 @@ describe("buildAgentSystemPrompt", () => {
     for (const stage of STAGES) {
       expect(prompt).toContain(stage.name);
     }
-    expect(prompt).toContain("Etapa actual del lead");
+    // F1: la etapa ACTUAL ya no vive en el system (viaja en la nota del turno).
+    expect(prompt).not.toContain("Etapa actual del lead");
     // El contrato de conversación solo produce texto para el cliente: los campos
     // del CRM (stage/empresa/comuna/rut) viven en el prompt de anotación.
     expect(prompt).toContain('"reply"');
@@ -297,20 +299,19 @@ describe("marca de saliente humano (P5)", () => {
     const prompt = buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
-      currentStage: null,
     });
     expect(prompt).not.toContain(HUMAN_ORIGIN_MARK);
   });
 });
 
 describe("buildAnnotationSystemPrompt", () => {
-  it("describe la extracción con las etapas y la etapa actual", () => {
+  it("describe la extracción con las etapas; la etapa actual va en la nota del turno (F1)", () => {
     const prompt = buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
-      currentStage: "Calificado",
     });
-    expect(prompt).toContain("Calificado");
+    expect(prompt).not.toContain("Etapa actual del lead:");
+    expect(renderAnnotationTurnState("Calificado")).toContain("Calificado");
     for (const stage of STAGES) {
       expect(prompt).toContain(stage.name);
     }
@@ -322,7 +323,6 @@ describe("buildAnnotationSystemPrompt", () => {
     const prompt = buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
-      currentStage: null,
     });
     // La sección de zonas trae cobertura y tarifa: nada de eso entra. Se afirma
     // sobre su contenido real (el formato de `renderDeliveryZones`, con tarifa),
@@ -340,7 +340,6 @@ describe("buildAnnotationSystemPrompt", () => {
     const prompt = buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
-      currentStage: null,
       catalog: CATALOGO_REAL,
     });
     // El esqueleto usa "..." como valor y el modelo puede copiarlo como si
@@ -355,7 +354,6 @@ describe("buildAnnotationSystemPrompt", () => {
     const prompt = buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
-      currentStage: null,
       catalog: CATALOG,
     });
     // El vocabulario que hace falta para reconocer producto y formato…
@@ -373,12 +371,10 @@ describe("buildAnnotationSystemPrompt", () => {
     const sinCatalogo = buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
-      currentStage: null,
     });
     expect(buildAnnotationSystemPrompt({
       profile: PROFILE,
       stages: STAGES,
-      currentStage: null,
       catalog: [],
     })).toBe(sinCatalogo);
     expect(sinCatalogo).not.toContain("PRODUCTOS DEL CATÁLOGO");

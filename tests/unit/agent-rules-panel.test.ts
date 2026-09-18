@@ -230,15 +230,18 @@ describe("GET /api/agent/prompt", () => {
     // actual, la caché de prefijo se perdería en cada turno.
     const reglasAt = prompt.indexOf("En cada turno responde ÚNICAMENTE");
     const etapasAt = prompt.indexOf("Etapas del pipeline");
-    const etapaActualAt = prompt.indexOf("Etapa actual del lead:");
 
     expect(etapasAt).toBeGreaterThan(0);
     expect(reglasAt).toBeGreaterThan(etapasAt);
-    expect(etapaActualAt).toBeGreaterThan(reglasAt);
+    // F1: la etapa actual ya no vive en el system.
+    expect(prompt).not.toContain("Etapa actual del lead:");
     // P1: la línea temporal ya no vive en el system. El panel muestra el prompt
     // base, sin la nota de fecha/hora que el pipeline adjunta al último mensaje
     // del cliente en cada turno.
     expect(prompt).not.toContain("Fecha y hora actuales:");
-    expect(prompt).not.toContain("CONTEXTO INTERNO DEL SISTEMA");
+    // F1: el system NOMBRA el marcador de la nota interna (le explica al modelo
+    // dónde llega el estado del turno), pero no contiene la nota en sí.
+    expect(prompt).not.toContain("Etapa actual del lead:");
+    expect(prompt).not.toContain("FICHA DEL CLIENTE");
   });
 });

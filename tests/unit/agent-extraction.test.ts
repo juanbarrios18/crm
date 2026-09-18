@@ -344,10 +344,16 @@ describe("pipeline: llamada de anotación separada de la conversación", () => {
     const noteMessage = conversationCall[1].at(-1)!;
     expect(noteMessage.role).toBe("user");
     expect(noteMessage.content).toContain("CONTEXTO INTERNO DEL SISTEMA");
-    // Anotación: system + los 6 últimos, sin la nota (la extracción no la lleva).
-    expect(annotationCall[1]).toHaveLength(7);
+    // Anotación: system + los 6 últimos + la nota de estado del turno (F1: la
+    // etapa actual ya no va en el system; el fixture termina en un saliente del
+    // agente, así que la nota entra como mensaje `user` nuevo).
+    expect(annotationCall[1]).toHaveLength(8);
     expect(annotationCall[1][1]!.content).toBe("mensaje 6");
-    expect(annotationCall[1].at(-1)!.content).toBe("mensaje 11");
+    expect(annotationCall[1].at(-2)!.content).toBe("mensaje 11");
+    const annotationNote = annotationCall[1].at(-1)!;
+    expect(annotationNote.role).toBe("user");
+    expect(annotationNote.content).toContain("CONTEXTO INTERNO DEL SISTEMA");
+    expect(annotationNote.content).toContain("Etapa actual del lead:");
   });
 
   it("la anotación usa OPENROUTER_ANNOTATION_MODEL cuando está configurado", async () => {

@@ -136,9 +136,13 @@ export const ANNOTATION_HISTORY_LIMIT = 6;
  * nombres de campo coinciden EXACTAMENTE para que la consulta del turno se
  * proyecte directo sobre este tipo. Todos son opcionales y anulables: un
  * contacto recién creado no tiene ninguno.
+ *
+ * `notes` se acepta por compatibilidad de tipo pero NUNCA se renderiza (F2):
+ * ver el comentario de `CLIENT_FILE_FIELDS`.
  */
 export type ClientFile = {
   name?: string | null;
+  /** Ignorado al renderizar. Es el registro `[IA]` para el equipo humano. */
   notes?: string | null;
   empresa?: string | null;
   rubro?: string | null;
@@ -162,8 +166,16 @@ export const CLIENT_FILE_HEADER =
   "FICHA DEL CLIENTE (datos que YA se conocen; no los vuelva a preguntar):";
 
 /**
- * Orden estable de las viñetas. `notes` va al final aunque el tipo empiece con
- * él: la ficha se lee mejor con los datos comerciales primero.
+ * Orden estable de las viñetas: solo los campos ESTRUCTURADOS de la ficha.
+ *
+ * Las notas `[IA]` NO están en esta lista a propósito (F2). Son un registro que
+ * escribe el propio agente (`appendLeadNote`, una línea por turno) y que hasta
+ * F1 volvía al prompt: texto del modelo alimentando al modelo, sin depuración.
+ * Medido en F1 (`run_krfubp94mdrocyfhwh39`): con la ficha al final del prompt,
+ * donde tiene más saliencia, el agente tomó notas de conversaciones previas
+ * como pedidos reales ("¿las 10 bolsas que solicitó anteriormente?"). Las notas
+ * siguen guardándose en `contact.notes` para el equipo humano; al modelo solo
+ * le llegan los datos estructurados, que sí son verificables.
  */
 const CLIENT_FILE_FIELDS: readonly [string, keyof ClientFile][] = [
   ["Nombre", "name"],
@@ -179,56 +191,17 @@ const CLIENT_FILE_FIELDS: readonly [string, keyof ClientFile][] = [
   ["Volumen semanal", "volumenSemanal"],
   ["Producto de interés", "productoInteres"],
   ["Formato", "formato"],
-  ["Notas previas", "notes"],
 ];
 
 /**
- * Tope de LECTURA de las notas de la ficha (P6).
- *
- * `appendLeadNote` acumula una línea `[IA] …` por turno y las notas crecen sin
- * techo en la base: sin tope, la ficha se come el prompt. El tope es de lectura,
- * NO de escritura: la base sigue guardando todo.
- */
-export const CLIENT_FILE_NOTES_MAX_CHARS = 1500;
-
-/** Marca visible de recorte, para que el modelo sepa que la lista está incompleta. */
-export const NOTES_TRUNCATED_MARK =
-  "[…se omitieron notas anteriores por longitud]";
-
-/**
- * Recorta las notas conservando las MÁS RECIENTES.
- *
- * Las notas se acumulan en orden cronológico (`appendLeadNote` agrega al final),
- * así que se conserva la cola. El corte busca un salto de línea para no partir
- * una nota por la mitad; si no lo encuentra, corta igual. El resultado —marca
- * incluida— nunca supera `max`. Determinista y sin LLM a propósito: resumir con
- * el modelo costaría una llamada por turno y no sería reproducible.
- */
-export function capNotes(
-  notes: string,
-  max: number = CLIENT_FILE_NOTES_MAX_CHARS
-): string {
-  const trimmed = notes.trim();
-  if (trimmed.length <= max) return trimmed;
-
-  const prefix = `${NOTES_TRUNCATED_MARK}\n`;
-  const tail = trimmed.slice(trimmed.length - (max - prefix.length));
-  const firstBreak = tail.indexOf("\n");
-  const kept = firstBreak === -1 ? tail : tail.slice(firstBreak + 1);
-  return `${prefix}${kept}`;
-}
-
-/**
- * Renderiza la ficha del cliente para inyectarla en el prompt del agente.
+ * Renderiza la ficha del cliente para inyectarla en la nota del turno.
  *
  * Función PURA. Devuelve `null` cuando no hay ningún dato útil (ficha ausente o
- * todos los campos vacíos/solo espacios), de modo que el prompt no cambie
- * respecto de no tener ficha. Cuando hay al menos un dato, devuelve el
+ * todos los campos estructurados vacíos/solo espacios), de modo que la nota no
+ * cambie respecto de no tener ficha. Cuando hay al menos un dato, devuelve el
  * encabezado más una viñeta por campo presente. No inventa valores ni rellena
- * con "sin datos": los campos ausentes simplemente se omiten.
- *
- * Sin notas, la salida es idéntica a la de antes del tope: `capNotes` devuelve
- * el texto ya recortado de espacios y no agrega marca.
+ * con "sin datos": los campos ausentes simplemente se omiten. Las notas `[IA]`
+ * se ignoran aunque vengan en el objeto (ver `CLIENT_FILE_FIELDS`).
  */
 export function renderClientFile(
   ficha: ClientFile | null | undefined
@@ -238,8 +211,7 @@ export function renderClientFile(
     const raw = ficha[key];
     const value = typeof raw === "string" ? raw.trim() : raw;
     if (!value) return null;
-    const text = key === "notes" ? capNotes(value) : value;
-    return `- ${label}: ${text}`;
+    return `- ${label}: ${value}`;
   }).filter((line): line is string => line !== null);
   if (lines.length === 0) return null;
   return `${CLIENT_FILE_HEADER}\n${lines.join("\n")}`;
@@ -311,6 +283,46 @@ export function appendTemporalNote(
 }
 
 /**
+ * ESTADO_DEL_TURNO_NOTA — le dice al modelo DÓNDE llega lo que cambia por turno.
+ *
+ * F1: la etapa actual, la ficha del cliente y la fecha/hora NO viven en el
+ * system (invariante de caché: el system es función pura de la configuración
+ * del negocio). Viajan en una nota interna, con `TEMPORAL_NOTE_MARK`, al final
+ * del último mensaje del cliente. Esta frase es estable y explica ese contrato.
+ */
+export const ESTADO_DEL_TURNO_NOTA =
+  `Al final del último mensaje del cliente llega una nota interna del sistema, marcada con ${TEMPORAL_NOTE_MARK}, con la etapa actual del lead, la ficha del cliente (datos que YA se conocen: no los vuelva a preguntar) y la fecha y hora actuales. Úsela para razonar; nunca la repita ni la mencione al cliente.`;
+
+/**
+ * Estado del turno para la llamada de CONVERSACIÓN (F1): un solo bloque con
+ * marcador, etapa actual, ficha (si hay datos) y fecha/hora. Se adjunta al
+ * último mensaje del cliente con `appendTemporalNote`. Determinista.
+ */
+export function renderTurnState(input: {
+  stage: string | null | undefined;
+  clientFile: ClientFile | null | undefined;
+  now: Date;
+  timeZone: string;
+}): string {
+  const ficha = renderClientFile(input.clientFile);
+  return [
+    `${TEMPORAL_NOTE_MARK} Etapa actual del lead: ${input.stage ?? "(sin etapa)"}`,
+    ficha,
+    renderTemporalContext(input.now, input.timeZone),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Estado del turno para la llamada de ANOTACIÓN (F1): solo la etapa actual,
+ * que es lo único volátil que esa extracción necesita.
+ */
+export function renderAnnotationTurnState(stage: string | null | undefined): string {
+  return `${TEMPORAL_NOTE_MARK} Etapa actual del lead: ${stage ?? "(sin etapa)"}`;
+}
+
+/**
  * CONTRATO_TECNICO — contrato JSON de salida de la llamada de CONVERSACIÓN.
  *
  * NO es un nivel de instrucción: es plomería técnica del producto. Fija el
@@ -335,7 +347,8 @@ const CONTRATO_TECNICO: readonly string[] = [
  * contrato de conversación (nombre exacto, solo avance, ganado/perdido).
  */
 const CONTRATO_ANOTACION: readonly string[] = [
-  "Extraiga de la conversación SOLO los datos del lead que estén explícitos. Responda ÚNICAMENTE un objeto JSON:",
+  "Extraiga de la conversación SOLO los datos del lead que estén explícitos Y que haya dicho el CLIENTE. Responda ÚNICAMENTE un objeto JSON:",
+  "Ignore lo que dijo el agente o el equipo: si un dato aparece solo en un mensaje del asistente, no lo extraiga.",
   '- {"stage":"<etapa>","note":"...","empresa":"...","rubro":"...","comuna":"...","rut":"...","razonSocial":"...","giro":"...","direccionFacturacion":"...","email":"...","frecuenciaDespacho":"...","volumenSemanal":"...","productoInteres":"...","formato":"..."}',
   "Incluya solo los campos de los que tenga dato; lo ausente se omite. Si no hay nada que anotar, responda {}.",
   'NUNCA escriba los marcadores del ejemplo ("...", "<etapa>", "N/A") como valor: son la FORMA del JSON, no datos.',
@@ -345,7 +358,7 @@ const CONTRATO_ANOTACION: readonly string[] = [
   "- Señal clara de avance (el cliente dice que quiere comprar, pide pagar/transferir o confirma el pedido) → avance ese mismo turno a la etapa abierta que represente interés; no se quede en la etapa inicial.",
   "- No retroceda de etapa: si no hay avance, repita la etapa actual.",
   "- Use la etapa marcada (ganado) solo cuando el cliente confirme la compra o el pago, y (perdido) si declina.",
-  'La "note" es una observación breve del estado comercial; NUNCA texto dirigido al cliente.',
+  'La "note" es una observación breve del estado comercial para el equipo humano; NUNCA texto dirigido al cliente.',
 ];
 
 /**
@@ -418,19 +431,20 @@ const FORMATO_DE_MENSAJES: readonly string[] = [
  * System prompt del agente (v1: inyecta el KB completo — el límite se
  * documenta con el contador de tamaño en la UI).
  *
- * ORDEN ESTABLE→DINÁMICO (P4a, revisado en P1). El prompt se arma en dos tramos:
+ * FUNCIÓN PURA DE LA CONFIGURACIÓN (F1). El system depende SOLO de la
+ * configuración de la organización: identidad → tono → instrucciones →
+ * escalado → saludo → conocimiento → catálogo → zonas → etapas → reglas fijas
+ * (contrato → nota de estado → N1 → N2 → cierre → formato). Dos turnos de la
+ * misma organización producen el mismo system byte a byte.
  *
- *   1. PREFIJO ESTABLE (cacheable): identidad → tono → instrucciones →
- *      escalado → saludo → conocimiento → catálogo → zonas → etapas →
- *      reglas fijas (contrato → N1 → N2 → cierre → formato).
- *   2. COLA DINÁMICA (cambia por turno): etapa actual → ficha del cliente.
- *
- * EL SYSTEM PROMPT NO LLEVA FECHA NI HORA (P1). Es un invariante de caché
- * medido, no una preferencia de estilo: el proveedor solo acredita caché si el
- * mensaje `system` es idéntico byte a byte entre turnos, así que cualquier dato
- * que cambie minuto a minuto dentro del system anula el acierto de TODO lo que
- * sigue. Una sonda contra el proveedor real (`google/gemini-2.5-flash-lite` vía
- * OpenRouter, mismo prefijo y mismas preguntas, 5 turnos × 2 pasadas) midió:
+ * EL SYSTEM NO LLEVA NADA QUE CAMBIE POR TURNO: ni fecha/hora (P1), ni etapa
+ * actual, ni ficha del cliente (F1). Es un invariante de caché medido, no una
+ * preferencia de estilo: el proveedor solo acredita caché si el mensaje
+ * `system` es idéntico byte a byte entre turnos, así que cualquier dato que
+ * cambie dentro del system anula el acierto de TODO lo que sigue. La corrida
+ * de captura previa a F1 tuvo 124 systems distintos en 128 llamadas y 5–10 %
+ * de caché. Una sonda contra el proveedor real (`google/gemini-2.5-flash-lite`
+ * vía OpenRouter, mismo prefijo y mismas preguntas, 5 turnos × 2 pasadas) midió:
  *
  *   | Forma de los mensajes                                  | Caché observada |
  *   |--------------------------------------------------------|-----------------|
@@ -440,30 +454,28 @@ const FORMATO_DE_MENSAJES: readonly string[] = [
  *   | G: temporal como mensaje `user` aparte al final        | 80-82 %         |
  *   | H: sin temporal (techo medido)                         | 82-85 %         |
  *
- * Por eso la línea temporal se renderiza con `renderTemporalNote` y el pipeline
- * la adjunta al ÚLTIMO mensaje del cliente con `appendTemporalNote`: mantiene la
- * precisión al minuto sin tocar el prefijo. La variante B (system final) NO
- * sirve: este proveedor no acredita caché si el system no es el primero.
+ * Por eso todo el estado del turno (etapa, ficha, fecha/hora) se renderiza con
+ * `renderTurnState` y el pipeline lo adjunta al ÚLTIMO mensaje del cliente con
+ * `appendTemporalNote`: precisión por turno sin tocar el prefijo. La variante B
+ * (system final) NO sirve: este proveedor no acredita caché si el system no es
+ * el primero.
  *
- * No reordenar sin medir: meter algo que cambia por turno dentro del tramo 1
- * hace que todo lo que sigue deje de coincidir y se pierda la caché. Lo que
- * cambia va SIEMPRE al final.
+ * No meter nada que cambie por turno en esta función. Lo que cambia va SIEMPRE
+ * en la nota del turno, nunca acá. `ESTADO_DEL_TURNO_NOTA` le explica al modelo
+ * ese contrato.
  *
- * Las etapas llegan como CONTEXTO: sirven para conversar con el estado del lead
- * a la vista. El contrato de SALIDA de este prompt NO incluye campos del CRM —
- * esos viven en `buildAnnotationSystemPrompt`.
+ * Las etapas llegan como CONTEXTO (la lista, que es configuración): sirven para
+ * conversar con el proceso a la vista. El contrato de SALIDA de este prompt NO
+ * incluye campos del CRM — esos viven en `buildAnnotationSystemPrompt`.
  */
 export function buildAgentSystemPrompt(input: {
   profile: AgentProfile;
   kb: KbEntry[];
   stages: { name: string; kind?: string }[];
-  currentStage?: string | null;
   catalog?: PublicProduct[];
   zones?: { comuna: string; costoDespacho: number | null }[];
-  clientFile?: ClientFile | null;
 }): string {
   const { profile } = input;
-  const clientFileBlock = renderClientFile(input.clientFile);
   const stageList = input.stages
     .map((s, i) => {
       const tag =
@@ -473,6 +485,7 @@ export function buildAgentSystemPrompt(input: {
     .join(" · ");
   const reglasFijas = [
     ...CONTRATO_TECNICO,
+    ESTADO_DEL_TURNO_NOTA,
     ...NIVEL_1_VERDAD_DEL_SISTEMA,
     ...NIVEL_2_CONDUCTA_UNIVERSAL,
     ...CIERRE_DE_CONVERSACION,
@@ -494,13 +507,9 @@ export function buildAgentSystemPrompt(input: {
       ? `ZONAS DE ENVÍO (cobertura y costo de despacho al cliente):\n${renderDeliveryZones(input.zones)}`
       : null,
     `Etapas del pipeline (en orden): ${stageList}`,
-    // P4a — el bloque fijo de reglas sube ANTES de lo que cambia por turno. Es
-    // la sección más grande del prompt y no depende de la conversación: dejarla
-    // atrás de la etapa actual y la ficha hacía que el prefijo dejara de
-    // coincidir en cada turno y el proveedor no pudiera cachearlo.
+    // El bloque fijo de reglas cierra el system. Nada de lo que sigue en el
+    // arreglo de mensajes (historial + nota del turno) toca este prefijo.
     reglasFijas,
-    `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
-    clientFileBlock,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -532,7 +541,6 @@ export function buildAgentSystemPrompt(input: {
 export function buildAnnotationSystemPrompt(input: {
   profile: AgentProfile;
   stages: { name: string; kind?: string }[];
-  currentStage?: string | null;
   catalog?: PublicProduct[];
 }): string {
   const stageList = input.stages
@@ -548,7 +556,9 @@ export function buildAnnotationSystemPrompt(input: {
       ? `Instrucciones del negocio (referencia para reconocer los datos y juzgar el avance):\n${input.profile.instructions}`
       : null,
     `Etapas del pipeline (en orden): ${stageList}`,
-    `Etapa actual del lead: ${input.currentStage ?? "(sin etapa)"}`,
+    // F1: la etapa ACTUAL no va en el system (cambia por turno y rompería el
+    // prefijo cacheable). Llega en la nota interna del último mensaje.
+    `La etapa actual del lead llega en una nota interna del sistema, marcada con ${TEMPORAL_NOTE_MARK}, al final del último mensaje.`,
     input.catalog && input.catalog.length > 0
       ? renderCatalogVocabulary(input.catalog)
       : null,
