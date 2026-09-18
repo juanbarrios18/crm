@@ -4,12 +4,14 @@ import { newId } from "@/lib/db/ids";
 import { publish } from "@/server/events/bus";
 import { runAgentTurn } from "@/server/ai/pipeline";
 import type { ChatTiming } from "@/lib/ai";
-import { renderCatalog, renderDeliveryZones, renderKb } from "@/server/ai/prompts";
+import { renderCatalog, renderDeliveryZones, renderKb, renderVoice } from "@/server/ai/prompts";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { computeScore, judgeCase } from "@/server/lab/judge";
 import { PERSONAS, type Persona } from "@/server/lab/personas";
 import { applyPipelineCheck } from "@/server/lab/pipeline-check";
 import { applyDialectCheck } from "@/server/lab/dialect-check";
+import { applyFactCheck } from "@/server/lab/fact-check";
+import type { PublicProduct } from "@/lib/catalog";
 
 /**
  * Runner del Laboratorio (FR-030/FR-034): corrida en segundo plano DENTRO del
@@ -144,7 +146,8 @@ async function runAllCases(
   const behaviorText = profile
     ? [
         `Nombre: ${profile.name}`,
-        profile.tone ? `Tono: ${profile.tone}` : null,
+        // F6: el juez evalúa contra la voz configurada (estructurada + matiz).
+        renderVoice(profile.voice, profile.tone),
         profile.instructions ? `Instrucciones: ${profile.instructions}` : null,
         profile.escalationRules ? `Escalado: ${profile.escalationRules}` : null,
       ]
@@ -155,8 +158,12 @@ async function runAllCases(
   // Ground truth del juez: catálogo público + zonas de envío (FR-030). Sin
   // esto, el juez tacha de alucinación todo precio/cobertura que el agente
   // cite correctamente desde el catálogo.
-  const catalogText = renderCatalog(await getActiveProductsPublic(organizationId));
-  const zonesText = renderDeliveryZones(await getActiveZones(organizationId));
+  // Los objetos se conservan: el chequeo determinista de hechos (F0) compara
+  // precios y formatos contra ellos, no contra el texto rendereado.
+  const catalog = await getActiveProductsPublic(organizationId);
+  const zones = await getActiveZones(organizationId);
+  const catalogText = renderCatalog(catalog);
+  const zonesText = renderDeliveryZones(zones);
 
   let done = 0;
   const total = cases.length;
@@ -174,7 +181,7 @@ async function runAllCases(
   const worker = async (): Promise<void> => {
     const testCase = queue.shift();
     if (!testCase) return;
-    await runOneCase(organizationId, testCase, { kbText, behaviorText, catalogText, zonesText }, stats);
+    await runOneCase(organizationId, testCase, { kbText, behaviorText, catalogText, zonesText, catalog, zones }, stats);
     done += 1;
     publishProgress(organizationId, runId, "running", done, total);
     return worker();
@@ -217,6 +224,8 @@ async function runOneCase(
     behaviorText: string;
     catalogText: string;
     zonesText: string;
+    catalog: PublicProduct[];
+    zones: { comuna: string; costoDespacho: number | null }[];
   },
   stats: { agentModel: string | null; judgeModel: string | null }
 ): Promise<void> {
@@ -278,8 +287,18 @@ async function runOneCase(
       veredicto: checked.veredicto,
       hallazgos: checked.hallazgos,
     });
-    veredicto = dialect.veredicto;
-    hallazgos = dialect.hallazgos;
+    // Tercero, los hechos: precios fuera de catálogo, formatos que el producto
+    // no tiene y afirmaciones que el canal no puede hacer. Verificable por
+    // código, sin depender del juez; cualquier hallazgo fuerza rojo.
+    const facts = applyFactCheck({
+      transcript,
+      catalog: ground.catalog,
+      zones: ground.zones,
+      veredicto: dialect.veredicto,
+      hallazgos: dialect.hallazgos,
+    });
+    veredicto = facts.veredicto;
+    hallazgos = facts.hallazgos;
   } else {
     // Diagnóstico persistido: antes el porqué del fallo del juez solo vivía en
     // un console.error. El caso sigue con `veredicto` en null y excluido de la
@@ -593,7 +612,32 @@ async function upsertTestContact(
       )
     )
     .limit(1);
-  return rows[0]!.id;
+  const contactId = rows[0]!.id;
+  // El contacto se REUTILIZA entre corridas y la ficha (campos estructurados y
+  // notas `[IA]`) se acumulaba de una corrida a la siguiente: la corrida N leía
+  // lo que el agente escribió en las N-1 anteriores y las corridas dejaban de
+  // ser comparables (medido 2026-09-18, F1). Cada corrida arranca con la ficha
+  // limpia; `seedTestLead` hace lo propio con la etapa.
+  await db
+    .update(schema.contact)
+    .set({
+      notes: null,
+      empresa: null,
+      rubro: null,
+      comuna: null,
+      rut: null,
+      razonSocial: null,
+      giro: null,
+      direccionFacturacion: null,
+      email: null,
+      frecuenciaDespacho: null,
+      volumenSemanal: null,
+      productoInteres: null,
+      formato: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.contact.id, contactId));
+  return contactId;
 }
 
 async function failRun(

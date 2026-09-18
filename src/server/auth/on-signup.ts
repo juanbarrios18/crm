@@ -2,13 +2,40 @@ import { count, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/lib/db";
 import { newId } from "@/lib/db/ids";
 
-/** Etapas sembradas del pipeline (US2). */
-const SEED_STAGES: { name: string; kind: "open" | "won" | "lost" }[] = [
-  { name: "Nuevo", kind: "open" },
-  { name: "En conversación", kind: "open" },
-  { name: "Interesado", kind: "open" },
-  { name: "Cliente", kind: "won" },
-  { name: "Perdido", kind: "lost" },
+/**
+ * Etapas sembradas del pipeline (US2). El criterio de entrada (F3) es genérico
+ * y el dueño lo ajusta desde el CRM: es lo que lee la anotación para mover leads.
+ */
+const SEED_STAGES: {
+  name: string;
+  kind: "open" | "won" | "lost";
+  criteria: string;
+}[] = [
+  {
+    name: "Nuevo",
+    kind: "open",
+    criteria: "Primer contacto: el cliente saludó o preguntó algo general.",
+  },
+  {
+    name: "En conversación",
+    kind: "open",
+    criteria: "El cliente dijo qué busca o preguntó por precios o condiciones.",
+  },
+  {
+    name: "Interesado",
+    kind: "open",
+    criteria: "El cliente pidió una cotización concreta o dijo que quiere avanzar.",
+  },
+  {
+    name: "Cliente",
+    kind: "won",
+    criteria: "El cliente confirmó la compra o el pago.",
+  },
+  {
+    name: "Perdido",
+    kind: "lost",
+    criteria: "El cliente declinó o dijo que no va a comprar.",
+  },
 ];
 
 /**
@@ -49,6 +76,7 @@ export async function onUserCreated(userId: string, userName: string) {
         name: s.name,
         position: i,
         kind: s.kind,
+        criteria: s.criteria,
       }))
     );
     await tx.insert(schema.agentProfile).values({

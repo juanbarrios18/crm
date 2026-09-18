@@ -11,6 +11,8 @@ type Params = { params: Promise<{ id: string }> };
 const patchSchema = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   position: z.number().int().min(0).optional(),
+  // F3: criterio de entrada a la etapa, insumo de la anotación. `null` lo borra.
+  criteria: z.string().trim().max(300).nullable().optional(),
 });
 
 export const PATCH = withAuth(async (session, req: Request, ctx: Params) => {
@@ -25,6 +27,9 @@ export const PATCH = withAuth(async (session, req: Request, ctx: Params) => {
       ...(body.data.name !== undefined ? { name: body.data.name } : {}),
       ...(body.data.position !== undefined
         ? { position: body.data.position }
+        : {}),
+      ...(body.data.criteria !== undefined
+        ? { criteria: body.data.criteria || null }
         : {}),
     })
     .where(

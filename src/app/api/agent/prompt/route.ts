@@ -24,11 +24,11 @@ export const dynamic = "force-dynamic";
 
 const CLIENT_FILE_NOTE =
   "Vista previa del prompt base: incluye la configuración, el conocimiento, el " +
-  "catálogo y las etapas de esta instancia. No incluye la ficha de un cliente " +
-  "concreto ni el historial de la conversación, que se agregan en cada turno. " +
-  "La fecha y hora del turno tampoco viajan en este prompt: se adjuntan en cada " +
-  "turno al último mensaje del cliente, para mantener estable el prefijo que el " +
-  "proveedor puede cachear.";
+  "catálogo y las etapas de esta instancia. Es el mismo en todos los turnos. " +
+  "La etapa actual del lead, la ficha del cliente y la fecha y hora no viajan " +
+  "en este prompt: se adjuntan en cada turno, como nota interna, al último " +
+  "mensaje del cliente, para mantener estable el prefijo que el proveedor " +
+  "puede cachear. El historial de la conversación también se agrega por turno.";
 
 export const GET = withAuth(async (session) => {
   const db = getDb();
@@ -67,7 +67,6 @@ export const GET = withAuth(async (session) => {
     profile,
     kb,
     stages,
-    currentStage: null,
     catalog,
     zones,
   });

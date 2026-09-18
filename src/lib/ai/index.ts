@@ -40,6 +40,8 @@ export type ChatTiming = {
   completionTokens: number | null;
   cachedTokens: number | null;
   provider: string | null;
+  /** F5: violaciones del guard determinista detectadas en el turno (0 si no hubo). */
+  guardViolations?: number;
 };
 
 const MAX_ATTEMPTS = 3;
@@ -67,7 +69,13 @@ export function testProviderGuard(baseUrl: string): string | null {
 export async function chatJson<T>(
   schema: z.ZodType<T>,
   messages: ChatMessage[],
-  opts?: { model?: string; judge?: boolean; timeoutMs?: number }
+  opts?: {
+    model?: string;
+    judge?: boolean;
+    timeoutMs?: number;
+    /** F3: pisa OPENROUTER_TEMPERATURE solo para esta llamada. */
+    temperature?: number;
+  }
 ): Promise<ChatJsonResult<T>> {
   if (!isAiConfigured()) {
     return {
@@ -117,7 +125,8 @@ export async function chatJson<T>(
       const { content, usage, provider } = await callProvider(
         model,
         attemptMessages,
-        opts?.timeoutMs
+        opts?.timeoutMs,
+        opts?.temperature
       );
       const latencyMs = Date.now() - startedAt;
       const extracted = extractJson(content);
@@ -153,7 +162,8 @@ export async function chatJson<T>(
 async function callProvider(
   model: string,
   messages: ChatMessage[],
-  timeoutMs = 60_000
+  timeoutMs = 60_000,
+  temperatureOverride?: number
 ): Promise<{ content: string; usage: ChatUsage | null; provider: string | null }> {
   const env = getEnv();
   const controller = new AbortController();
@@ -162,7 +172,8 @@ async function callProvider(
   const reasoningEffort = env.OPENROUTER_REASONING_EFFORT;
   // P3: temperatura explícita opcional. Ausente → la clave no viaja y el body
   // queda idéntico al de antes, con el default del modelo.
-  const temperature = env.OPENROUTER_TEMPERATURE;
+  // F3: la llamada puede fijar su propia temperatura (la anotación usa 0).
+  const temperature = temperatureOverride ?? env.OPENROUTER_TEMPERATURE;
   const body: Record<string, unknown> = {
     model,
     messages,

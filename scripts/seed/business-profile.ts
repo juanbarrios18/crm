@@ -12,10 +12,13 @@
 import { readFileSync } from "node:fs";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import * as schema from "@/lib/db/schema";
 import { newId } from "@/lib/db/ids";
-import { LAMAS_FOODS_PROFILE } from "@/server/seed/business-profile";
+import {
+  LAMAS_FOODS_PROFILE,
+  LAMAS_FOODS_STAGE_CRITERIA,
+} from "@/server/seed/business-profile";
 
 function loadEnvVar(name: string): string | undefined {
   if (process.env[name]) return process.env[name];
@@ -81,6 +84,26 @@ if (existing[0]) {
   });
 }
 
+// F3: criterio de entrada por etapa, insumo de la anotación. Se asigna por
+// nombre; las etapas que el dueño renombró o agregó quedan como están.
+let stagesUpdated = 0;
+for (const [name, criteria] of Object.entries(LAMAS_FOODS_STAGE_CRITERIA)) {
+  const res = await db
+    .update(schema.pipelineStage)
+    .set({ criteria })
+    .where(
+      and(
+        eq(schema.pipelineStage.organizationId, org.id),
+        eq(schema.pipelineStage.name, name)
+      )
+    )
+    .returning({ id: schema.pipelineStage.id });
+  stagesUpdated += res.length;
+}
+
+console.log(
+  `[seed] Criterios de etapa: ${stagesUpdated} de ${Object.keys(LAMAS_FOODS_STAGE_CRITERIA).length} etapas actualizadas.`
+);
 console.log(
   `[seed] Configuración de "${org.name}" ${existing[0] ? "actualizada" : "creada"}: ` +
     `saludo ${LAMAS_FOODS_PROFILE.greeting.length} chars, ` +

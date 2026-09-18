@@ -9,6 +9,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type { AgentVoice } from "@/lib/agent-voice";
 import { sql } from "drizzle-orm";
 
 /* ============================================================
@@ -160,6 +161,12 @@ export const pipelineStage = pgTable(
     kind: text("kind", { enum: ["open", "won", "lost"] })
       .notNull()
       .default("open"),
+    /**
+     * Criterio de entrada a la etapa (F3): una o dos líneas que dicen cuándo un
+     * lead pasa a estar acá. Es el ÚNICO insumo de la anotación para juzgar el
+     * avance; reemplaza a las instrucciones completas del negocio en esa llamada.
+     */
+    criteria: text("criteria"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("stage_org_pos_idx").on(t.organizationId, t.position)]
@@ -372,6 +379,8 @@ export const agentProfile = pgTable(
     instructions: text("instructions"),
     escalationRules: text("escalation_rules"),
     greeting: text("greeting"),
+    /** Voz estructurada (F6): tratamiento, país y largo. `tone` queda como matiz. */
+    voice: jsonb("voice").$type<AgentVoice>(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

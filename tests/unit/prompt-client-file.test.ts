@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentSystemPrompt,
-  capNotes,
   CLIENT_FILE_HEADER,
-  CLIENT_FILE_NOTES_MAX_CHARS,
-  NOTES_TRUNCATED_MARK,
   renderClientFile,
+  renderTurnState,
   type ClientFile,
 } from "@/server/ai/prompts";
+
+const NOW = new Date("2026-09-17T15:30:00Z");
+const TZ = "America/Santiago";
 
 /**
  * Ficha del cliente en el prompt (FR-030). El turno inyecta los datos
@@ -26,6 +27,7 @@ const PROFILE = {
   instructions: "Ofrece despacho y retiro según las reglas del negocio.",
   escalationRules: "Escala si piden crédito o un humano.",
   greeting: null,
+  voice: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -123,7 +125,9 @@ describe("renderClientFile", () => {
     expect(block).toContain("- Volumen semanal: 200 bolsas");
     expect(block).toContain("- Producto de interés: Pan de hamburguesa");
     expect(block).toContain("- Formato: 12 cm");
-    expect(block).toContain("- Notas previas: [IA] Pidió cotización formal.");
+    // F2: las notas [IA] nunca se renderizan aunque la ficha las traiga.
+    expect(block).not.toContain("Notas previas");
+    expect(block).not.toContain("[IA]");
   });
 
   it("omite las viñetas de los campos ausentes sin inventar valores", () => {
@@ -137,9 +141,9 @@ describe("renderClientFile", () => {
   });
 
   it("recorta los espacios de cada valor", () => {
-    const block = renderClientFile({ empresa: "  Lamas  ", notes: "  urgente " });
+    const block = renderClientFile({ empresa: "  Lamas  ", rubro: "  urgente " });
     expect(block).toContain("- Empresa: Lamas");
-    expect(block).toContain("- Notas previas: urgente");
+    expect(block).toContain("- Rubro: urgente");
     expect(block).not.toContain("  Lamas");
   });
 
@@ -151,148 +155,78 @@ describe("renderClientFile", () => {
   });
 });
 
-describe("buildAgentSystemPrompt con ficha del cliente", () => {
-  it("sin datos el prompt es idéntico al de hoy (sin sección vacía)", () => {
+describe("la ficha del cliente viaja en la nota del turno, no en el system (F1)", () => {
+  it("el system es idéntico con o sin ficha: la ficha no lo toca", () => {
     const base = build();
-    expect(build({ clientFile: null })).toBe(base);
-    expect(build({ clientFile: undefined })).toBe(base);
-    expect(build({ clientFile: EMPTY_FICHA })).toBe(base);
-    expect(build({ clientFile: BLANK_FICHA })).toBe(base);
     expect(base).not.toContain(CLIENT_FILE_HEADER);
+    expect(base).toBe(build());
   });
 
-  it("inyecta el bloque con los datos cargados", () => {
-    const prompt = build({ clientFile: FICHA });
-    expect(prompt).toContain(CLIENT_FILE_HEADER);
-    expect(prompt).toContain("- Nombre: Ana Pérez");
-    expect(prompt).toContain("- Comuna: Macul");
-    expect(prompt).toContain("- Correo: compras@lamas.cl");
+  it("renderTurnState omite el bloque cuando la ficha no aporta datos", () => {
+    for (const ficha of [null, undefined, EMPTY_FICHA, BLANK_FICHA]) {
+      const state = renderTurnState({ stage: "Nuevo", clientFile: ficha, now: NOW, timeZone: TZ });
+      expect(state).not.toContain(CLIENT_FILE_HEADER);
+    }
   });
 
-  it("ubica la ficha en la COLA dinámica, después de todo lo estable (P4a)", () => {
-    const prompt = build({ clientFile: { name: "Ana" } });
-    // Lo estable va primero y de forma contigua; el proveedor cachea por
-    // prefijo, así que si algo que cambia por turno se cuela antes, se pierde
-    // la caché de todo lo que sigue.
-    const estable = [
-      'Usted es "Asistente comercial"',
-      "Tono:",
-      "Instrucciones del negocio:",
-      "Reglas de escalado a humano:",
-      "CONOCIMIENTO DEL NEGOCIO",
-      "CATÁLOGO DE PRODUCTOS",
-      "ZONAS DE ENVÍO",
-      "Etapas del pipeline",
-      "En cada turno responde ÚNICAMENTE", // bloque fijo de reglas
-    ];
-    const dinamico = ["Etapa actual del lead:", CLIENT_FILE_HEADER];
+  it("renderTurnState inyecta el bloque con los datos cargados", () => {
+    const state = renderTurnState({ stage: "Nuevo", clientFile: FICHA, now: NOW, timeZone: TZ });
+    expect(state).toContain(CLIENT_FILE_HEADER);
+    expect(state).toContain("- Nombre: Ana Pérez");
+    expect(state).toContain("- Comuna: Macul");
+    expect(state).toContain("- Correo: compras@lamas.cl");
+  });
 
-    const lastEstable = Math.max(...estable.map((s) => prompt.indexOf(s)));
-    const firstDinamico = Math.min(...dinamico.map((s) => prompt.indexOf(s)));
-    expect(lastEstable).toBeGreaterThanOrEqual(0);
-    expect(lastEstable).toBeLessThan(firstDinamico);
-
-    // Y dentro de la cola dinámica se conserva el orden: la ficha cierra el
-    // prompt (P1: la línea temporal ya no vive acá).
-    const etapaAt = prompt.indexOf("Etapa actual del lead:");
-    const fichaAt = prompt.indexOf(CLIENT_FILE_HEADER);
+  it("dentro de la nota del turno el orden es etapa → ficha → fecha", () => {
+    const state = renderTurnState({ stage: "Nuevo", clientFile: { name: "Ana" }, now: NOW, timeZone: TZ });
+    const etapaAt = state.indexOf("Etapa actual del lead:");
+    const fichaAt = state.indexOf(CLIENT_FILE_HEADER);
+    const fechaAt = state.indexOf("Fecha y hora actuales:");
+    expect(etapaAt).toBeGreaterThanOrEqual(0);
     expect(etapaAt).toBeLessThan(fichaAt);
-    expect(prompt).not.toContain("Fecha y hora actuales:");
+    expect(fichaAt).toBeLessThan(fechaAt);
   });
 
-  it("el bloque de reglas fijas queda ANTES de la etapa actual y de la ficha (P4a)", () => {
-    const prompt = build({ clientFile: { name: "Ana" } });
-    const rulesAt = prompt.indexOf("En cada turno responde ÚNICAMENTE");
-    expect(rulesAt).toBeGreaterThanOrEqual(0);
-    expect(rulesAt).toBeLessThan(prompt.indexOf("Etapa actual del lead:"));
-    expect(rulesAt).toBeLessThan(prompt.indexOf(CLIENT_FILE_HEADER));
+  it("el system prompt termina en el bloque de reglas fijas y no lleva fecha", () => {
+    const prompt = build();
+    expect(prompt).toContain("En cada turno responde ÚNICAMENTE");
+    expect(prompt).not.toContain("Etapa actual del lead:");
+    expect(prompt).not.toContain("Fecha y hora actuales:");
   });
 });
 
 /**
- * P6 — tope de LECTURA de las notas. `appendLeadNote` acumula una línea por
- * turno y las notas crecen sin techo en la base: sin tope, con el tiempo la
- * ficha se come el prompt. El tope NO toca la escritura.
+ * F2 — la ficha NUNCA incluye las notas. `appendLeadNote` sigue escribiendo las
+ * notas `[IA]` en `contact.notes` para el equipo humano, pero ese registro lo
+ * escribe el propio agente y realimentarlo al prompt lo hacía tomar notas de
+ * conversaciones previas como pedidos reales (medido en F1).
  */
-describe("capNotes (P6)", () => {
-  it("no toca un texto que cabe en el tope", () => {
-    const notes = "[IA] Consultó por pan de hamburguesa.";
-    expect(capNotes(notes)).toBe(notes);
-    expect(capNotes(notes)).not.toContain(NOTES_TRUNCATED_MARK);
+describe("la ficha nunca incluye notas (F2)", () => {
+  it("ignora las notas aunque la ficha las traiga", () => {
+    expect(renderClientFile({ name: "Ana", notes: "[IA] algo" })).toBe(
+      `${CLIENT_FILE_HEADER}\n- Nombre: Ana`
+    );
   });
 
-  it("recorta espacios sobrantes sin agregar marca", () => {
-    expect(capNotes("  [IA] algo  ")).toBe("[IA] algo");
+  it("una ficha que SOLO tiene notas es una ficha vacía", () => {
+    expect(renderClientFile({ notes: "[IA] algo" })).toBeNull();
+    expect(renderClientFile({ notes: "[IA] a\n[IA] b\n[IA] c" })).toBeNull();
   });
 
-  it("con 30 notas conserva las MÁS RECIENTES y no supera el tope", () => {
-    // Notas de largo realista (~70 caracteres): 30 de ellas superan el tope.
+  it("la nota del turno tampoco arrastra notas, por largas que sean", () => {
     const notes = Array.from(
       { length: 30 },
       (_, i) => `[IA] nota numero ${i + 1}: consulto por despacho y precios`
     ).join("\n");
-    const capped = capNotes(notes);
-
-    expect(notes.length).toBeGreaterThan(CLIENT_FILE_NOTES_MAX_CHARS);
-    expect(capped.length).toBeLessThanOrEqual(CLIENT_FILE_NOTES_MAX_CHARS);
-    expect(capped).toContain(NOTES_TRUNCATED_MARK);
-    // La última nota siempre sobrevive: es la más reciente.
-    expect(capped).toContain("nota numero 30:");
-    // La primera ya no está.
-    expect(capped).not.toContain("nota numero 1:");
-  });
-
-  it("corta en un salto de línea, sin partir una nota por la mitad", () => {
-    const notes = Array.from(
-      { length: 200 },
-      (_, i) => `[IA] nota ${i + 1}`
-    ).join("\n");
-    const capped = capNotes(notes);
-    const body = capped.slice(NOTES_TRUNCATED_MARK.length + 1);
-    // El cuerpo arranca en el inicio de una nota, no a mitad de una.
-    expect(body.startsWith("[IA] nota ")).toBe(true);
-  });
-
-  it("es determinista: el mismo texto da el mismo recorte", () => {
-    const notes = Array.from({ length: 100 }, (_, i) => `[IA] n${i}`).join("\n");
-    expect(capNotes(notes)).toBe(capNotes(notes));
-  });
-});
-
-describe("buildAgentSystemPrompt con notas extensas (P6)", () => {
-  it("la ficha no supera el tope aunque la base tenga 30 notas", () => {
-    const notes = Array.from(
-      { length: 30 },
-      (_, i) => `[IA] nota numero ${i + 1}: consulto por despacho y precios`
-    ).join("\n");
-    const prompt = build({
-      profile: { ...PROFILE, instructions: "x" },
+    const state = renderTurnState({
+      stage: "Nuevo",
       clientFile: { name: "Ana", notes },
+      now: NOW,
+      timeZone: TZ,
     });
-    // La ficha cierra el prompt (P1: la línea temporal ya no viaja en el system),
-    // así que el bloque va desde su encabezado hasta el final.
-    const start = prompt.indexOf(CLIENT_FILE_HEADER);
-    const block = prompt.slice(start);
-    expect(block).toContain(NOTES_TRUNCATED_MARK);
-    expect(block).toContain("nota numero 30:");
-    expect(block).not.toContain("nota numero 1:");
-    expect(block.length).toBeLessThan(CLIENT_FILE_NOTES_MAX_CHARS + 200);
-    // Y el prompt SIN tope habría sido notoriamente más grande.
-    expect(prompt).not.toContain("nota numero 1:");
-  });
-
-  it("sin notas la ficha es idéntica a la de antes del tope", () => {
-    expect(renderClientFile({ name: "Ana", notes: null })).toBe(
-      `${CLIENT_FILE_HEADER}\n- Nombre: Ana`
-    );
-    expect(renderClientFile({ name: "Ana", notes: "   " })).toBe(
-      `${CLIENT_FILE_HEADER}\n- Nombre: Ana`
-    );
-  });
-
-  it("con notas cortas la ficha conserva el texto tal cual", () => {
-    expect(renderClientFile({ notes: "[IA] pidió despacho a Macul" })).toBe(
-      `${CLIENT_FILE_HEADER}\n- Notas previas: [IA] pidió despacho a Macul`
-    );
+    expect(state).toContain("- Nombre: Ana");
+    expect(state).not.toContain("[IA]");
+    expect(state).not.toContain("Notas previas");
+    expect(state).not.toContain("nota numero");
   });
 });

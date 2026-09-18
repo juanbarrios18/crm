@@ -187,6 +187,20 @@ describe("chatJson (reintentos y errores tipados)", () => {
     expect(body.reasoning).toEqual({ effort: "medium" });
   });
 
+  it("opts.temperature se envía como body.temperature y pisa OPENROUTER_TEMPERATURE (F3)", async () => {
+    vi.stubEnv("OPENROUTER_TEMPERATURE", "0.3");
+    const { chatJson } = await import("@/lib/ai");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        providerResponse(JSON.stringify({ action: "reply", text: "ok" }))
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await chatJson(schema, [{ role: "user", content: "x" }], { temperature: 0 });
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.temperature).toBe(0);
+  });
+
   it("NO envía reasoning si OPENROUTER_REASONING_EFFORT está vacío", async () => {
     vi.stubEnv("OPENROUTER_REASONING_EFFORT", "");
     const fetchMock = vi

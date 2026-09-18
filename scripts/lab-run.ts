@@ -25,6 +25,7 @@ import * as schema from "@/lib/db/schema";
 import { computeDispersion } from "@/server/lab/judge";
 import { PERSONA_LABELS } from "@/server/lab/personas";
 import { RunConflictError, startRun } from "@/server/lab/runner";
+import { summarizeRun } from "@/server/lab/run-metrics";
 
 /** Persona que motiva la medición: el cliente que escribe con modismos. */
 const PERSONA_FOCO = "errores_modismos";
@@ -209,6 +210,23 @@ if (error) lineas.push(`error:        ${error}`);
 lineas.push(
   `inestables:   ${dispersion.inestables} de ${dispersion.personas.length} personas`
 );
+// F0: tokens, caché y hallazgos por tipo son el criterio de éxito de las fases
+// de optimización; van en el informe para comparar corridas sin SQL.
+const resumen = summarizeRun(cases);
+lineas.push("");
+lineas.push("-- Tokens y caché (todas las llamadas del turno sumadas) --");
+lineas.push(`turnos:            ${resumen.turnos}`);
+lineas.push(`prompt tokens:     ${resumen.promptTokens}`);
+lineas.push(
+  `caché:             ${resumen.cachedTokens} (${resumen.cachePct} %) en ${resumen.turnosConCache} turnos`
+);
+lineas.push(`facturados/turno:  ${Math.round(resumen.facturadosPorTurno)}`);
+lineas.push(`guard (correcciones): ${resumen.guardViolations}`);
+lineas.push("");
+lineas.push("-- Hallazgos por tipo --");
+const tipos = Object.entries(resumen.hallazgosPorTipo).sort((a, b) => b[1] - a[1]);
+if (tipos.length === 0) lineas.push("ninguno");
+for (const [tipo, n] of tipos) lineas.push(`${tipo}: ${n}`);
 lineas.push("");
 lineas.push("-- Veredicto por persona --");
 for (const p of dispersion.personas) {

@@ -14,15 +14,17 @@ import {
   type LeadExtractionType,
 } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
-import { toConversationHistory } from "@/server/ai/history";
+import { isBotOutbound, toConversationHistory } from "@/server/ai/history";
 import {
   ANNOTATION_HISTORY_LIMIT,
   appendTemporalNote,
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
   CLOSING_FAREWELL,
-  renderTemporalNote,
+  renderAnnotationTurnState,
+  renderTurnState,
 } from "@/server/ai/prompts";
+import { guardReply, SAFE_FALLBACK_REPLY } from "@/server/ai/reply-guard";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { notifyHandoff } from "@/server/push/notify";
 
@@ -232,6 +234,8 @@ export async function runAgentTurn(
       name: schema.pipelineStage.name,
       position: schema.pipelineStage.position,
       kind: schema.pipelineStage.kind,
+      // F3: el criterio de entrada es lo que lee la anotación para mover leads.
+      criteria: schema.pipelineStage.criteria,
     })
     .from(schema.pipelineStage)
     .where(eq(schema.pipelineStage.organizationId, organizationId))
@@ -246,12 +250,14 @@ export async function runAgentTurn(
   const currentStageId = leadRows[0]?.stageId ?? null;
   const currentStage = stages.find((s) => s.id === currentStageId) ?? null;
 
-  // Ficha del cliente: datos comerciales ya capturados + nombre + notas. Se
-  // inyecta en el prompt para que el agente NO vuelva a preguntar lo conocido.
+  // Ficha del cliente: datos comerciales ya capturados + nombre. Viaja en la
+  // nota del turno para que el agente NO vuelva a preguntar lo conocido. Las
+  // notas `[IA]` NO se leen (F2): son un registro del propio agente para el
+  // equipo humano y realimentarlas al modelo lo hacía tomar notas de
+  // conversaciones previas como pedidos reales.
   const contactRows = await db
     .select({
       name: schema.contact.name,
-      notes: schema.contact.notes,
       empresa: schema.contact.empresa,
       rubro: schema.contact.rubro,
       comuna: schema.contact.comuna,
@@ -279,18 +285,19 @@ export async function runAgentTurn(
   const catalog = await getActiveProductsPublic(organizationId);
   const zones = await getActiveZones(organizationId);
 
-  // P1 — la nota de fecha/hora NO viaja en el system. El proveedor solo acredita
-  // caché si el system es idéntico byte a byte entre turnos: la sonda medida (5
-  // turnos × 2 pasadas, `google/gemini-2.5-flash-lite` vía OpenRouter) da 0 % de
-  // caché con la línea dentro del system y 81-82 % desde el turno 3 con la nota
-  // adjunta al último mensaje del cliente. La tabla completa está en el comentario
-  // de `buildAgentSystemPrompt`. En el caso normal la nota va pegada al último
-  // mensaje del cliente (no en uno nuevo aparte) para no alterar la forma del
-  // historial; el caso borde está documentado en `appendTemporalNote`.
-  const temporalNote = renderTemporalNote(
-    new Date(),
-    getEnv().BUSINESS_TIMEZONE
-  );
+  // F1 — NADA que cambie por turno viaja en el system: ni fecha/hora (P1), ni
+  // etapa actual, ni ficha del cliente. El proveedor solo acredita caché si el
+  // system es idéntico byte a byte entre turnos (sonda: 0 % con estado dentro
+  // del system, 81-82 % con la nota adjunta al último mensaje del cliente; la
+  // tabla está en el comentario de `buildAgentSystemPrompt`). Todo el estado
+  // del turno se arma con `renderTurnState` y va pegado al último mensaje del
+  // cliente; el caso borde está documentado en `appendTemporalNote`.
+  const turnState = renderTurnState({
+    stage: currentStage?.name ?? null,
+    clientFile,
+    now: new Date(),
+    timeZone: getEnv().BUSINESS_TIMEZONE,
+  });
   const messages: ChatMessage[] = appendTemporalNote(
     [
       {
@@ -299,15 +306,13 @@ export async function runAgentTurn(
           profile,
           kb,
           stages,
-          currentStage: currentStage?.name ?? null,
           catalog,
           zones,
-          clientFile,
         }),
       },
       ...toConversationHistory(history),
     ],
-    temporalNote
+    turnState
   );
 
   // Mensajes de la anotación (llamada 2). Su ENTRADA no depende del reply de la
@@ -323,20 +328,25 @@ export async function runAgentTurn(
   // El historial va en modo `plain-assistant`: la marca de saliente humano la
   // explica N2, que vive solo en el prompt de conversación. Acá es extracción
   // pura y el marcador sería ruido sin explicación.
-  const annotationMessages: ChatMessage[] = [
-    {
-      role: "system",
-      content: buildAnnotationSystemPrompt({
-        profile,
-        stages,
-        currentStage: currentStage?.name ?? null,
-        catalog,
-      }),
-    },
-    ...toConversationHistory(history, { humanOutbound: "plain-assistant" }).slice(
-      -ANNOTATION_HISTORY_LIMIT
-    ),
-  ];
+  //
+  // F1: la etapa ACTUAL tampoco va en este system (cambia por turno); viaja en
+  // la nota interna al final del último mensaje, igual que en la conversación.
+  const annotationMessages: ChatMessage[] = appendTemporalNote(
+    [
+      {
+        role: "system",
+        content: buildAnnotationSystemPrompt({
+          profile,
+          stages,
+          catalog,
+        }),
+      },
+      ...toConversationHistory(history, { humanOutbound: "plain-assistant" }).slice(
+        -ANNOTATION_HISTORY_LIMIT
+      ),
+    ],
+    renderAnnotationTurnState(currentStage?.name ?? null)
+  );
 
   // ── Llamadas 1 y 2 EN PARALELO (P1) ───────────────────────────────────────
   // El turno se parte en dos llamadas independientes: la conversación produce
@@ -352,8 +362,10 @@ export async function runAgentTurn(
   // P2: la anotación puede usar su propio modelo (`OPENROUTER_ANNOTATION_MODEL`).
   // Sin la variable, `chatJson` cae a OPENROUTER_MODEL como antes.
   const annotationModel = getEnv().OPENROUTER_ANNOTATION_MODEL;
+  // F3: la extracción es determinista por diseño → temperatura 0 salvo override.
   const annotationPromise = chatJson(LeadExtraction, annotationMessages, {
     model: annotationModel,
+    temperature: getEnv().OPENROUTER_ANNOTATION_TEMPERATURE ?? 0,
   }).then((result) => {
     annotationDoneAt = Date.now();
     return result;
@@ -414,6 +426,57 @@ export async function runAgentTurn(
       });
       const corrected = corrective.data.reply.trim();
       if (corrected) reply = corrected;
+    }
+  }
+
+  // ── Guard determinista (F5) ────────────────────────────────────────────────
+  // Antes de entregar, el reply se verifica contra las fuentes de verdad
+  // (precios y formatos del catálogo, tarifas de despacho) y contra las
+  // afirmaciones que el canal no puede hacer. Una violación pide UNA corrección
+  // con la falla citada, como mensaje system al FINAL (el prefijo cacheable no
+  // se toca). Si la corrección también falla, o la llamada falla, se entrega la
+  // respuesta segura. Nunca lanza: un error del guard no puede tumbar el turno.
+  let guardViolations = 0;
+  if (reply) {
+    try {
+      const sources = { catalog, zones };
+      // F5b: cuántas veces habló ya el agente en el hilo, para detectar el
+      // saludo repetido. Se cuenta sobre el mismo historial de la llamada.
+      const guardContext = {
+        greeting: profile.greeting,
+        agentTurnsBefore: history.filter((m) => isBotOutbound(m)).length,
+      };
+      const first = guardReply(reply, sources, guardContext);
+      if (!first.ok) {
+        guardViolations += first.violations.length;
+        console.warn(
+          `[guard] ${conversationId}: ${first.violations.map((v) => `${v.kind}=${v.detail}`).join(" | ")}`
+        );
+        const retry = await chatJson(ConversationReply, [
+          ...messages,
+          { role: "assistant", content: conversationResult.raw },
+          { role: "system", content: first.correction },
+        ]);
+        conversationDoneAt = Date.now();
+        let corrected: string | null = null;
+        if (retry.ok) {
+          timedCalls.push({
+            model: retry.model,
+            latencyMs: retry.latencyMs,
+            usage: retry.usage,
+            provider: retry.provider,
+          });
+          const candidate = retry.data.reply.trim();
+          if (candidate) {
+            const second = guardReply(candidate, sources, guardContext);
+            if (second.ok) corrected = candidate;
+            else guardViolations += second.violations.length;
+          }
+        }
+        reply = corrected ?? SAFE_FALLBACK_REPLY;
+      }
+    } catch (err) {
+      console.error("[guard] error inesperado, se entrega el reply original:", err);
     }
   }
 
@@ -483,7 +546,7 @@ export async function runAgentTurn(
   const latencyMs =
     Math.max(conversationDoneAt, annotationDoneAt || conversationDoneAt) -
     turnStartedAt;
-  return accumulateTiming(timedCalls, latencyMs);
+  return { ...accumulateTiming(timedCalls, latencyMs), guardViolations };
 }
 
 type Conversation = typeof schema.conversation.$inferSelect;

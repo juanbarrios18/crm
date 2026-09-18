@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { summarizeRules } from "@/server/ai/rule-summary";
+import type { AgentVoice } from "@/lib/agent-voice";
 
 type Profile = {
   enabled: boolean;
@@ -17,7 +18,23 @@ type Profile = {
   instructions: string | null;
   escalationRules: string | null;
   greeting: string | null;
+  /** Voz estructurada (F6); null → el prompt usa solo el tono libre. */
+  voice: AgentVoice | null;
 };
+
+/** Límites del servidor (PUT /api/agent/profile); el contador los muestra. */
+const INSTRUCTIONS_MAX = 8000;
+const ESCALATION_MAX = 4000;
+
+function CharCounter({ value, max }: { value: string | null; max: number }) {
+  const chars = (value ?? "").length;
+  const warning = chars >= max * 0.8;
+  return (
+    <p className={`text-xs ${warning ? "text-amber-600" : "text-muted-foreground"}`}>
+      {chars.toLocaleString("es-MX")} / {max.toLocaleString("es-MX")} caracteres
+    </p>
+  );
+}
 
 type KbEntry = {
   id: string;
@@ -161,17 +178,81 @@ function ProfileSection({
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-voice-trato">Tratamiento</Label>
+              <select
+                id="agent-voice-trato"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={form.voice?.tratamiento ?? "usted"}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    voice: {
+                      tratamiento: e.target.value as AgentVoice["tratamiento"],
+                      pais: form.voice?.pais ?? "",
+                      largo: form.voice?.largo ?? "medio",
+                    },
+                  })
+                }
+              >
+                <option value="usted">Usted</option>
+                <option value="tu">Tú</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-voice-pais">País o región</Label>
+              <Input
+                id="agent-voice-pais"
+                placeholder="Chile"
+                value={form.voice?.pais ?? ""}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    voice: {
+                      tratamiento: form.voice?.tratamiento ?? "usted",
+                      pais: e.target.value,
+                      largo: form.voice?.largo ?? "medio",
+                    },
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-voice-largo">Largo de los mensajes</Label>
+              <select
+                id="agent-voice-largo"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={form.voice?.largo ?? "medio"}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    voice: {
+                      tratamiento: form.voice?.tratamiento ?? "usted",
+                      pais: form.voice?.pais ?? "",
+                      largo: e.target.value as AgentVoice["largo"],
+                    },
+                  })
+                }
+              >
+                <option value="corto">Corto (1-2 líneas)</option>
+                <option value="medio">Medio (2-3 líneas)</option>
+              </select>
+            </div>
+          </div>
+          {form.voice && !form.voice.pais.trim() && (
+            <p className="text-xs text-muted-foreground">
+              Indique el país o región para que el agente use ese español.
+            </p>
+          )}
           <div className="space-y-1.5">
-            <Label htmlFor="agent-tone">Tono</Label>
+            <Label htmlFor="agent-tone">Matices de tono (opcional)</Label>
             <Input
               id="agent-tone"
-              placeholder="p. ej. cercano y directo, con usted"
+              placeholder="p. ej. cercano y directo"
               value={form.tone ?? ""}
               onChange={(e) => setForm({ ...form, tone: e.target.value })}
             />
-            {!form.tone && (
-              <p className="text-xs text-muted-foreground">Sin configurar</p>
-            )}
           </div>
         </div>
 
@@ -188,6 +269,7 @@ function ProfileSection({
               value={form.instructions ?? ""}
               onChange={(e) => setForm({ ...form, instructions: e.target.value })}
             />
+            <CharCounter value={form.instructions} max={INSTRUCTIONS_MAX} />
             {!form.instructions && (
               <p className="text-xs text-muted-foreground">Sin configurar</p>
             )}
@@ -207,6 +289,7 @@ function ProfileSection({
               value={form.escalationRules ?? ""}
               onChange={(e) => setForm({ ...form, escalationRules: e.target.value })}
             />
+            <CharCounter value={form.escalationRules} max={ESCALATION_MAX} />
             {!form.escalationRules && (
               <p className="text-xs text-muted-foreground">Sin configurar</p>
             )}
@@ -231,7 +314,16 @@ function ProfileSection({
           </div>
         </div>
 
-        <Button onClick={() => void onSave(form)}>Guardar comportamiento</Button>
+        <Button
+          onClick={() =>
+            void onSave({
+              ...form,
+              voice: form.voice && form.voice.pais.trim() ? form.voice : null,
+            })
+          }
+        >
+          Guardar comportamiento
+        </Button>
       </CardContent>
     </Card>
   );
