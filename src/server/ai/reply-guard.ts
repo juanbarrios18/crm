@@ -70,13 +70,12 @@ function normalizeLoose(text: string): string {
     .trim();
 }
 
-/** Margen de caracteres sobre el saludo a partir del cual hay contenido real. */
-const GREETING_SLACK_CHARS = 40;
-
 /**
  * Detecta que la respuesta ES el saludo configurado (o arranca con su primera
- * oración y no agrega nada más) cuando el agente ya habló antes. Una respuesta
- * que empieza con el saludo pero sigue con contenido real no se marca.
+ * oración) cuando el agente ya habló antes. Medido en la corrida F5+F6: con una
+ * tolerancia de largo, el modelo seguía abriendo cada turno con el saludo y
+ * pegaba el contenido detrás. Volver a saludar es repetir el saludo, traiga o
+ * no contenido: la regla de estilo lo prohíbe y el guard lo hace cumplir.
  */
 export function isRepeatedGreeting(reply: string, context: GuardContext): boolean {
   const greeting = context.greeting?.trim();
@@ -86,11 +85,7 @@ export function isRepeatedGreeting(reply: string, context: GuardContext): boolea
   if (!normGreeting) return false;
   if (normReply === normGreeting) return true;
   const firstSentence = normalizeLoose(greeting.split(/[.?!]/)[0] ?? "");
-  return (
-    firstSentence.length > 0 &&
-    normReply.startsWith(firstSentence) &&
-    reply.trim().length < greeting.length + GREETING_SLACK_CHARS
-  );
+  return firstSentence.length > 0 && normReply.startsWith(firstSentence);
 }
 
 /**

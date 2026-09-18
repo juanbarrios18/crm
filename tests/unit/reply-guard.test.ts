@@ -110,10 +110,17 @@ describe("guardReply — saludo repetido (F5b)", () => {
     ).toBe(true);
   });
 
-  it("acepta una respuesta que arranca como el saludo pero trae contenido real", () => {
+  it("rechaza volver a saludar aunque traiga contenido detrás (medido en F5+F6)", () => {
     const reply =
       "Hola, somos el equipo comercial de Lamas Foods. El pan de hamburguesa 12 cm sale $2.220 neto ($2.641,80 con IVA), bolsa de 12. ¿Para qué comuna sería el despacho?";
-    expect(guardReply(reply, sources, { greeting: GREETING, agentTurnsBefore: 2 }).ok).toBe(true);
+    const out = guardReply(reply, sources, { greeting: GREETING, agentTurnsBefore: 2 });
+    expect(out.ok).toBe(false);
+  });
+
+  it("acepta un saludo con contenido en el PRIMER turno del agente", () => {
+    const reply =
+      "Hola, somos el equipo comercial de Lamas Foods. El pan de hamburguesa 12 cm sale $2.220 neto ($2.641,80 con IVA), bolsa de 12.";
+    expect(guardReply(reply, sources, { greeting: GREETING, agentTurnsBefore: 0 }).ok).toBe(true);
   });
 
   it("sin saludo configurado no hay nada que comparar", () => {

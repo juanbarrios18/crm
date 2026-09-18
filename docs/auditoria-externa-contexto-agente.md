@@ -305,3 +305,41 @@ Lecturas:
 - `debio_escalar` 9: `comprador_decidido` × 3 ("¿me hacen precio?") sigue sin escalar aunque N2 lo pide en una línea explícita. `gemini-2.5-flash-lite` no sostiene esa regla con consistencia: candidato a resolverse por código (detección de intención de descuento/crédito → handoff) o con un modelo un escalón arriba (F7).
 - `alucinacion` del juez: 2 de 4 son falsas (listar las comunas con cobertura es correcto; "este canal no gestiona envíos de documentos" es N1). Las reales: "pan de completo 20 cm … bolsa de 6" (es bolsa de 10) y "así podremos emitir su boleta".
 - El % de caché sube con el prompt más chico, pero el techo absoluto por turno baja a ≈1.500 tokens cacheados: lo que queda sin caché es el historial y la anotación, ambos legítimamente variables. La meta de 60 % no es alcanzable con caché de prefijo implícita sobre conversaciones de 5 turnos; el objetivo operativo real es facturados por turno, que ya bajó 39 %.
+
+## F5 + F6 — guard determinista y voz estructurada — corrida `run_35b08s9hgs4lasupit4p` (2026-09-18)
+
+Cambios: guard antes de enviar (precio, formato, afirmación imposible, saludo repetido; una corrección citada; fallback seguro) y voz estructurada (`agent_profile.voice`, formulario, línea de voz compuesta por código, juez evalúa contra la voz configurada). Corrida única para las dos fases por presupuesto.
+
+| Métrica | F4 | F5+F6 | Meta |
+|---|---|---|---|
+| Facturados por turno | 2.494 | 2.771 | ≤2.200 |
+| % tokens cacheados | 29,6 % | 22 % | ≥60 % |
+| Correcciones del guard | — | 2 (1 fallback seguro entregado) | — |
+| `afirmacion_sin_evidencia` | 5 | **1** | ≤6 |
+| `alucinacion` | 4 | 4 (2 falsas del juez) | ≤4 |
+| `debio_escalar` | 9 | 9 | ≤6 |
+| `tono` | 12 | 11 | ≤5 |
+| Personas inestables | 7/13 | 9/13 | — |
+
+Lecturas:
+
+- Los facturados suben ~280 tokens/turno: las correcciones del guard son llamadas extra y la línea de voz suma unas palabras. Es el precio de bajar `afirmacion_sin_evidencia` de 5 a 1. Tokens por respuesta correcta, no por respuesta: la métrica a mirar es facturados por turno **sin fallas graves**.
+- Saludo repetido: bajó de 5 a 2 turnos, y los 2 restantes traían contenido detrás del saludo (la tolerancia de largo los dejó pasar). Regla endurecida tras la corrida: volver a saludar con un turno previo del agente es violación, traiga o no contenido. Sin medir todavía.
+- `debio_escalar` 9 se mantiene: `comprador_decidido` ("¿me hacen precio?") y `cliente_enojado` (pide datos en vez de escalar). Es el límite del modelo con reglas de conducta condicionales, no del contexto. Dos salidas, ambas fuera de este plan: detección de intención de descuento/crédito/reclamo por código → `handoff`, o F7 (modelo un escalón arriba, hoy costeable gracias al ahorro).
+- El juez sigue siendo el instrumento débil (9 inestables de 13; 2 `judge_failed` por timeout en todas las corridas). Próximo paso del instrumento: reintento del juez y una muestra anotada a mano para calibrarlo.
+
+## Cierre del plan (2026-09-18)
+
+| Métrica | Baseline F0 | Final F5+F6 | Meta | Estado |
+|---|---|---|---|---|
+| Facturados por turno | 4.078 | 2.771 (mín. 2.494 en F4) | ≤2.200 | −32 %, meta no alcanzada |
+| System de conversación | ~10.200 chars | 8.451 chars | ≤8.500 | **cumplida** |
+| % caché | 10,1 % | 22–30 % | ≥60 % | mecanismo demostrado; la meta no es alcanzable con caché implícita en conversaciones de 5 turnos |
+| `alucinacion` | 3 | 4 (2 falsas) | ≤4 | cumplida |
+| `afirmacion_sin_evidencia` | 3 | 1 | ≤6 | **cumplida** |
+| `debio_escalar` | 12 | 9 | ≤6 | no cumplida (límite del modelo) |
+| `tono` | 22 | 11 | ≤5 | a la mitad |
+
+Frontera código ↔ CRM al cierre: el código posee contrato de salida, capacidades del canal, conducta universal (7 líneas), estilo, fuentes de verdad, guard y estado del turno; el CRM posee identidad, voz estructurada, matices, proceso comercial, escalado, criterios por etapa, conocimiento, catálogo y zonas.
+
+Lecciones de protocolo: (1) nunca aplicar seeds ni migraciones con una corrida en curso (el pipeline lee el perfil por turno); (2) los contactos de prueba se resetean por corrida; (3) las corridas headless sobreviven a reinicios del servidor de desarrollo.
