@@ -40,6 +40,8 @@ export type ChatTiming = {
   completionTokens: number | null;
   cachedTokens: number | null;
   provider: string | null;
+  /** F5: violaciones del guard determinista detectadas en el turno (0 si no hubo). */
+  guardViolations?: number;
 };
 
 const MAX_ATTEMPTS = 3;

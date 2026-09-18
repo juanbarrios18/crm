@@ -154,6 +154,79 @@ function fmtCl(n: number): string {
   return dec === "00" ? withDots : `${withDots},${dec}`;
 }
 
+/**
+ * Una violación de hechos en un texto del agente. `detail` es legible y
+ * autocontenido ("$3.990", `"pan de hamburguesa" en formato 15 cm`, la frase
+ * prohibida) para citarlo tanto en el informe del Laboratorio como en la
+ * corrección que el pipeline le devuelve al modelo (F5, `reply-guard.ts`).
+ */
+export type FactViolation = {
+  kind: "precio" | "formato" | "afirmacion";
+  detail: string;
+};
+
+/**
+ * Núcleo puro y reutilizable: verifica UN texto del agente contra las fuentes
+ * de verdad. Lo comparten el Laboratorio (post-mortem por turno) y el guard
+ * de producción (antes de enviar). Sin duplicados: el mismo precio inventado
+ * dos veces cuenta una vez.
+ */
+export function checkAgentText(
+  text: string,
+  sources: {
+    catalog: PublicProduct[];
+    zones: { comuna: string; costoDespacho: number | null }[];
+  }
+): FactViolation[] {
+  const prices = allowedPrices(sources.catalog, sources.zones);
+  const formats = formatsByProduct(sources.catalog);
+  const out: FactViolation[] = [];
+  const seen = new Set<string>();
+  const push = (key: string, v: FactViolation) => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(v);
+  };
+
+  // 1. Precios fuera de las fuentes de verdad.
+  for (const price of extractPrices(text)) {
+    if (isDerivedPrice(price, prices)) continue;
+    push(`precio:${price}`, { kind: "precio", detail: `$${fmtCl(price)}` });
+  }
+
+  // 2. Formato inexistente para un producto nombrado.
+  const norm = normalize(text);
+  for (const [producto, permitidos] of formats) {
+    if (!norm.includes(producto)) continue;
+    for (const m of norm.matchAll(/(\d+)\s*cm\b/g)) {
+      const formato = `${m[1]} cm`;
+      if (permitidos.has(formato)) continue;
+      push(`formato:${producto}:${formato}`, {
+        kind: "formato",
+        detail: `"${producto}" en formato ${formato}`,
+      });
+    }
+  }
+
+  // 3. Afirmaciones que el canal no puede hacer.
+  const claim = findForbiddenClaim(text);
+  if (claim) push(`claim:${claim}`, { kind: "afirmacion", detail: claim });
+
+  return out;
+}
+
+function describeFinding(turno: number, v: FactViolation, text: string): string {
+  const cita = `"${clip(text)}"`;
+  switch (v.kind) {
+    case "precio":
+      return `El turno ${turno} del agente cita ${v.detail}, que no está en el catálogo ni en las tarifas de despacho: ${cita}`;
+    case "formato":
+      return `El turno ${turno} del agente ofrece ${v.detail}, que ese producto no tiene en el catálogo: ${cita}`;
+    case "afirmacion":
+      return `El turno ${turno} del agente afirma una acción que el canal no puede ejecutar ("${v.detail}"): ${cita}`;
+  }
+}
+
 export function applyFactCheck(input: {
   transcript: TranscriptTurn[];
   catalog: PublicProduct[];
@@ -161,52 +234,18 @@ export function applyFactCheck(input: {
   veredicto: VerdictLevel;
   hallazgos: unknown[];
 }): { veredicto: VerdictLevel; hallazgos: unknown[] } {
-  const prices = allowedPrices(input.catalog, input.zones);
-  const formats = formatsByProduct(input.catalog);
   const nuevos: FactFinding[] = [];
-  // Una evidencia por hecho distinto: el mismo precio inventado dos veces no
-  // infla el reporte.
+  // Una evidencia por hecho distinto en toda la conversación: el mismo precio
+  // inventado en dos turnos no infla el reporte.
   const seen = new Set<string>();
-  const push = (key: string, evidencia: string) => {
-    if (seen.has(key)) return;
-    seen.add(key);
-    nuevos.push({ tipo: "hecho", evidencia });
-  };
 
   input.transcript.forEach((turn, index) => {
     if (turn.role !== "agente") return;
-    const turno = index + 1;
-
-    // 1. Precios fuera de las fuentes de verdad.
-    for (const price of extractPrices(turn.text)) {
-      if (isDerivedPrice(price, prices)) continue;
-      push(
-        `precio:${price}`,
-        `El turno ${turno} del agente cita $${fmtCl(price)}, que no está en el catálogo ni en las tarifas de despacho: "${clip(turn.text)}"`
-      );
-    }
-
-    // 2. Formato inexistente para un producto nombrado.
-    const norm = normalize(turn.text);
-    for (const [producto, permitidos] of formats) {
-      if (!norm.includes(producto)) continue;
-      for (const m of norm.matchAll(/(\d+)\s*cm\b/g)) {
-        const formato = `${m[1]} cm`;
-        if (permitidos.has(formato)) continue;
-        push(
-          `formato:${producto}:${formato}`,
-          `El turno ${turno} del agente ofrece "${producto}" en formato ${formato}, que ese producto no tiene en el catálogo: "${clip(turn.text)}"`
-        );
-      }
-    }
-
-    // 3. Afirmaciones que el canal no puede hacer.
-    const claim = findForbiddenClaim(turn.text);
-    if (claim) {
-      push(
-        `claim:${claim}`,
-        `El turno ${turno} del agente afirma una acción que el canal no puede ejecutar ("${claim}"): "${clip(turn.text)}"`
-      );
+    for (const v of checkAgentText(turn.text, input)) {
+      const key = `${v.kind}:${v.detail}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      nuevos.push({ tipo: "hecho", evidencia: describeFinding(index + 1, v, turn.text) });
     }
   });
 

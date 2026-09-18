@@ -24,6 +24,7 @@ import {
   renderAnnotationTurnState,
   renderTurnState,
 } from "@/server/ai/prompts";
+import { guardReply, SAFE_FALLBACK_REPLY } from "@/server/ai/reply-guard";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { notifyHandoff } from "@/server/push/notify";
 
@@ -428,6 +429,51 @@ export async function runAgentTurn(
     }
   }
 
+  // ── Guard determinista (F5) ────────────────────────────────────────────────
+  // Antes de entregar, el reply se verifica contra las fuentes de verdad
+  // (precios y formatos del catálogo, tarifas de despacho) y contra las
+  // afirmaciones que el canal no puede hacer. Una violación pide UNA corrección
+  // con la falla citada, como mensaje system al FINAL (el prefijo cacheable no
+  // se toca). Si la corrección también falla, o la llamada falla, se entrega la
+  // respuesta segura. Nunca lanza: un error del guard no puede tumbar el turno.
+  let guardViolations = 0;
+  if (reply) {
+    try {
+      const sources = { catalog, zones };
+      const first = guardReply(reply, sources);
+      if (!first.ok) {
+        guardViolations += first.violations.length;
+        console.warn(
+          `[guard] ${conversationId}: ${first.violations.map((v) => `${v.kind}=${v.detail}`).join(" | ")}`
+        );
+        const retry = await chatJson(ConversationReply, [
+          ...messages,
+          { role: "assistant", content: conversationResult.raw },
+          { role: "system", content: first.correction },
+        ]);
+        conversationDoneAt = Date.now();
+        let corrected: string | null = null;
+        if (retry.ok) {
+          timedCalls.push({
+            model: retry.model,
+            latencyMs: retry.latencyMs,
+            usage: retry.usage,
+            provider: retry.provider,
+          });
+          const candidate = retry.data.reply.trim();
+          if (candidate) {
+            const second = guardReply(candidate, sources);
+            if (second.ok) corrected = candidate;
+            else guardViolations += second.violations.length;
+          }
+        }
+        reply = corrected ?? SAFE_FALLBACK_REPLY;
+      }
+    } catch (err) {
+      console.error("[guard] error inesperado, se entrega el reply original:", err);
+    }
+  }
+
   // ── Entrega ───────────────────────────────────────────────────────────────
   // Ocurre SIN esperar la anotación (P1): el cliente recibe su respuesta con el
   // máximo de las dos llamadas, no con la suma.
@@ -494,7 +540,7 @@ export async function runAgentTurn(
   const latencyMs =
     Math.max(conversationDoneAt, annotationDoneAt || conversationDoneAt) -
     turnStartedAt;
-  return accumulateTiming(timedCalls, latencyMs);
+  return { ...accumulateTiming(timedCalls, latencyMs), guardViolations };
 }
 
 type Conversation = typeof schema.conversation.$inferSelect;
