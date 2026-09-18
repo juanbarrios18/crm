@@ -110,15 +110,17 @@ const PROFILE_ROWS = [
     tone: null,
     instructions: null,
     escalationRules: null,
-    greeting: null,
+    greeting: "Hola, somos el equipo comercial. ¿Qué pan necesita?",
   },
 ];
 
-function pushSelects() {
+function pushSelects(history: unknown[] = [
+  { id: "m1", direction: "in", text: "cuánto sale?", createdAt: new Date() },
+]) {
   selectQueue.push(
     CONVERSATION_ROWS,
     PROFILE_ROWS,
-    [{ id: "m1", direction: "in", text: "cuánto sale?", createdAt: new Date() }],
+    history,
     [],
     [{ id: "stg_new", name: "Nuevo", position: 0, kind: "open" }],
     [],
@@ -171,6 +173,30 @@ describe("pipeline: guard determinista de la respuesta (F5)", () => {
     const { SAFE_FALLBACK_REPLY } = await import("@/server/ai/reply-guard");
     await runAgentTurn("cv_1");
     expect(deliveredText()).toBe(SAFE_FALLBACK_REPLY);
+    expect(call).toBe(3);
+  });
+
+  it("saludo repetido en el segundo turno → una corrección y se entrega la respuesta real (F5b)", async () => {
+    responses.push(
+      { reply: "Hola, somos el equipo comercial. ¿Qué pan necesita?" }, // repite el saludo
+      { stage: "Nuevo" },
+      { reply: "Ese dato lo confirmo con el equipo y le escribo." }
+    );
+    pushSelects([
+      { id: "m1", direction: "in", text: "hola", createdAt: new Date(1) },
+      {
+        id: "m2",
+        direction: "out",
+        origin: "ai",
+        aiGenerated: true,
+        text: "Hola, somos el equipo comercial. ¿Qué pan necesita?",
+        createdAt: new Date(2),
+      },
+      { id: "m3", direction: "in", text: "me mandan la boleta al correo?", createdAt: new Date(3) },
+    ]);
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    await runAgentTurn("cv_1");
+    expect(deliveredText()).toBe("Ese dato lo confirmo con el equipo y le escribo.");
     expect(call).toBe(3);
   });
 });

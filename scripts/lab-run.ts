@@ -221,6 +221,7 @@ lineas.push(
   `caché:             ${resumen.cachedTokens} (${resumen.cachePct} %) en ${resumen.turnosConCache} turnos`
 );
 lineas.push(`facturados/turno:  ${Math.round(resumen.facturadosPorTurno)}`);
+lineas.push(`guard (correcciones): ${resumen.guardViolations}`);
 lineas.push("");
 lineas.push("-- Hallazgos por tipo --");
 const tipos = Object.entries(resumen.hallazgosPorTipo).sort((a, b) => b[1] - a[1]);

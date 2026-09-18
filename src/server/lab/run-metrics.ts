@@ -29,6 +29,8 @@ export type RunSummary = {
   facturadosPorTurno: number;
   turnosConCache: number;
   hallazgosPorTipo: Record<string, number>;
+  /** Correcciones del guard determinista (F5), sumadas sobre los turnos. */
+  guardViolations: number;
 };
 
 function isTiming(value: unknown): value is ChatTiming {
@@ -40,6 +42,7 @@ export function summarizeRun(cases: RunCaseLike[]): RunSummary {
   let promptTokens = 0;
   let cachedTokens = 0;
   let turnosConCache = 0;
+  let guardViolations = 0;
   const hallazgosPorTipo: Record<string, number> = {};
 
   for (const c of cases) {
@@ -51,6 +54,7 @@ export function summarizeRun(cases: RunCaseLike[]): RunSummary {
       const cached = m.cachedTokens ?? 0;
       cachedTokens += cached;
       if (cached > 0) turnosConCache += 1;
+      guardViolations += (m as { guardViolations?: number }).guardViolations ?? 0;
     }
     const hallazgos = Array.isArray(c.hallazgos) ? c.hallazgos : [];
     for (const h of hallazgos) {
@@ -75,5 +79,6 @@ export function summarizeRun(cases: RunCaseLike[]): RunSummary {
     facturadosPorTurno,
     turnosConCache,
     hallazgosPorTipo,
+    guardViolations,
   };
 }

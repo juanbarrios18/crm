@@ -38,3 +38,13 @@ describe("summarizeRun", () => {
     expect(out.facturadosPorTurno).toBe(0);
   });
 });
+
+describe("summarizeRun — correcciones del guard (F5)", () => {
+  it("suma guardViolations tratando la ausencia como 0", () => {
+    const out = summarizeRun([
+      { turnMetrics: [{ ...turn(100, 0), guardViolations: 2 }, turn(100, 0)], hallazgos: [] },
+      { turnMetrics: [{ ...turn(100, 0), guardViolations: 1 }], hallazgos: [] },
+    ]);
+    expect(out.guardViolations).toBe(3);
+  });
+});

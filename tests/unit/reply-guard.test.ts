@@ -91,3 +91,32 @@ describe("guardReply", () => {
     expect(guardReply(SAFE_FALLBACK_REPLY, { catalog: [], zones: [] }).ok).toBe(true);
   });
 });
+
+describe("guardReply — saludo repetido (F5b)", () => {
+  const GREETING =
+    "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?";
+
+  it("rechaza el saludo literal cuando el agente ya habló antes", () => {
+    const out = guardReply(GREETING, sources, { greeting: GREETING, agentTurnsBefore: 1 });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toEqual(["saludo_repetido"]);
+    expect(out.correction).toContain("repite el saludo inicial");
+  });
+
+  it("acepta el saludo en el primer turno del agente", () => {
+    expect(
+      guardReply(GREETING, sources, { greeting: GREETING, agentTurnsBefore: 0 }).ok
+    ).toBe(true);
+  });
+
+  it("acepta una respuesta que arranca como el saludo pero trae contenido real", () => {
+    const reply =
+      "Hola, somos el equipo comercial de Lamas Foods. El pan de hamburguesa 12 cm sale $2.220 neto ($2.641,80 con IVA), bolsa de 12. ¿Para qué comuna sería el despacho?";
+    expect(guardReply(reply, sources, { greeting: GREETING, agentTurnsBefore: 2 }).ok).toBe(true);
+  });
+
+  it("sin saludo configurado no hay nada que comparar", () => {
+    expect(guardReply(GREETING, sources, { greeting: null, agentTurnsBefore: 3 }).ok).toBe(true);
+  });
+});

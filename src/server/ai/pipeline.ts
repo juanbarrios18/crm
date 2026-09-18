@@ -14,7 +14,7 @@ import {
   type LeadExtractionType,
 } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
-import { toConversationHistory } from "@/server/ai/history";
+import { isBotOutbound, toConversationHistory } from "@/server/ai/history";
 import {
   ANNOTATION_HISTORY_LIMIT,
   appendTemporalNote,
@@ -440,7 +440,13 @@ export async function runAgentTurn(
   if (reply) {
     try {
       const sources = { catalog, zones };
-      const first = guardReply(reply, sources);
+      // F5b: cuántas veces habló ya el agente en el hilo, para detectar el
+      // saludo repetido. Se cuenta sobre el mismo historial de la llamada.
+      const guardContext = {
+        greeting: profile.greeting,
+        agentTurnsBefore: history.filter((m) => isBotOutbound(m)).length,
+      };
+      const first = guardReply(reply, sources, guardContext);
       if (!first.ok) {
         guardViolations += first.violations.length;
         console.warn(
@@ -462,7 +468,7 @@ export async function runAgentTurn(
           });
           const candidate = retry.data.reply.trim();
           if (candidate) {
-            const second = guardReply(candidate, sources);
+            const second = guardReply(candidate, sources, guardContext);
             if (second.ok) corrected = candidate;
             else guardViolations += second.violations.length;
           }
