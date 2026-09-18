@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "@/lib/ai";
+import type { PublicProduct } from "@/lib/catalog";
+import { LAMAS_FOODS_PROFILE } from "@/server/seed/business-profile";
 import {
   appendTemporalNote,
   buildAgentSystemPrompt,
+  CLOSING_FAREWELL,
+  NIVEL_1_VERDAD_DEL_SISTEMA,
   buildAnnotationSystemPrompt,
   CLIENT_FILE_HEADER,
   ESTADO_DEL_TURNO_NOTA,
@@ -128,5 +132,91 @@ describe("contrato de anotación (F2)", () => {
     });
     expect(prompt).toContain("Ignore lo que dijo el agente");
     expect(prompt).toContain("para el equipo humano");
+  });
+});
+
+/**
+ * F4 — tamaño del system prompt con el perfil REAL de desarrollo (Lamas Foods):
+ * 12 productos, 11 zonas, 5 etapas. La medición de la auditoría daba ≈12.000
+ * caracteres (~3.300 tokens) de reglamento; la meta es ≤ 8.500 (~2.100 tokens)
+ * sin perder las garantías de N1/N2 ni las fuentes de la voz del negocio.
+ */
+describe("F4 — poda del system prompt (perfil Lamas Foods)", () => {
+  const profile = {
+    ...PROFILE,
+    name: LAMAS_FOODS_PROFILE.name,
+    tone: LAMAS_FOODS_PROFILE.tone,
+    instructions: LAMAS_FOODS_PROFILE.instructions,
+    escalationRules: LAMAS_FOODS_PROFILE.escalationRules,
+    greeting: LAMAS_FOODS_PROFILE.greeting,
+  };
+  const producto = (
+    producto: string,
+    masa: string,
+    formato: string,
+    unidades: number,
+    neto: number
+  ): PublicProduct => ({
+    producto,
+    masa,
+    formato,
+    unidadesPorBolsa: unidades,
+    precioUnitarioNeto: neto / unidades,
+    precioBolsaNeto: neto,
+    precioBolsaConIva: Math.round(neto * 1.19 * 100) / 100,
+    imagen: null,
+    activo: true,
+    notas: null,
+  });
+  const catalog: PublicProduct[] = [
+    producto("Pan ciabatta", "Regular", "Estandar", 6, 2400),
+    producto("Pan de completo", "Papa", "30 cm", 6, 3600),
+    producto("Pan de completo", "Papa", "20 cm", 10, 3600),
+    producto("Pan de completo", "Papa", "15 cm", 12, 4080),
+    producto("Pan de hamburguesa", "Brioche", "12 cm", 6, 2220),
+    producto("Pan de hamburguesa", "Brioche", "11 cm", 9, 3150),
+    producto("Pan de hamburguesa", "Brioche", "10 cm", 12, 3960),
+    producto("Pan de hamburguesa", "Papa", "10 cm", 12, 4560),
+    producto("Pan de hamburguesa", "Papa", "11 cm", 9, 3600),
+    producto("Pan de hamburguesa", "Papa", "12 cm", 6, 2520),
+    producto("Pan de molde", "Blanco XL", "22 rebanadas 14x14 cm", 1, 3600),
+    producto("Pan de molde", "Brioche", "Unidad", 1, 2600),
+  ];
+  const zones = [
+    "La Florida", "La Reina", "Las Condes", "Macul", "Nunoa", "Penalolen",
+    "Providencia", "San Joaquin", "San Miguel", "Santiago", "Vitacura",
+  ].map((comuna) => ({ comuna, costoDespacho: comuna === "Vitacura" ? 6000 : 5000 }));
+  const stages = [
+    { name: "Nuevo" },
+    { name: "En conversación" },
+    { name: "Interesado" },
+    { name: "Cliente", kind: "won" },
+    { name: "Perdido", kind: "lost" },
+  ];
+
+  const prompt = buildAgentSystemPrompt({ profile, kb: [], stages, catalog, zones });
+
+  it(`ocupa ≤ 8.500 caracteres (actual: ${prompt.length})`, () => {
+    expect(prompt.length).toBeLessThanOrEqual(8500);
+  });
+
+  it("conserva las garantías y saca las fórmulas de call center", () => {
+    for (const line of NIVEL_1_VERDAD_DEL_SISTEMA) expect(prompt).toContain(line);
+    expect(prompt).toContain("handoff");
+    expect(prompt).not.toContain("Estimado");
+    expect(prompt.toLowerCase()).not.toContain("quedamos a su disposición");
+    expect(prompt).not.toContain("knowledge base vacío");
+    expect(prompt).toContain("FUENTES DE VERDAD");
+  });
+
+  it("el catálogo va agrupado por producto y masa, con los números exactos", () => {
+    expect(prompt).toContain("Pan de hamburguesa — masa Brioche:");
+    expect(prompt).toContain("- 12 cm · bolsa de 6 · $2.220 neto · $2.641,80 con IVA");
+    expect(prompt).not.toContain("Pan de hamburguesa — masa Brioche — formato 12 cm");
+  });
+
+  it("el cierre determinista no usa fórmula telefónica", () => {
+    expect(CLOSING_FAREWELL.toLowerCase()).not.toContain("a la orden");
+    expect(CLOSING_FAREWELL.toLowerCase()).not.toContain("disposición");
   });
 });
