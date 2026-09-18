@@ -4,7 +4,7 @@ import { newId } from "@/lib/db/ids";
 import { publish } from "@/server/events/bus";
 import { runAgentTurn } from "@/server/ai/pipeline";
 import type { ChatTiming } from "@/lib/ai";
-import { renderCatalog, renderDeliveryZones, renderKb } from "@/server/ai/prompts";
+import { renderCatalog, renderDeliveryZones, renderKb, renderVoice } from "@/server/ai/prompts";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { computeScore, judgeCase } from "@/server/lab/judge";
 import { PERSONAS, type Persona } from "@/server/lab/personas";
@@ -146,7 +146,8 @@ async function runAllCases(
   const behaviorText = profile
     ? [
         `Nombre: ${profile.name}`,
-        profile.tone ? `Tono: ${profile.tone}` : null,
+        // F6: el juez evalúa contra la voz configurada (estructurada + matiz).
+        renderVoice(profile.voice, profile.tone),
         profile.instructions ? `Instrucciones: ${profile.instructions}` : null,
         profile.escalationRules ? `Escalado: ${profile.escalationRules}` : null,
       ]

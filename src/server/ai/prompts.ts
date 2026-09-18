@@ -26,6 +26,7 @@
 import type { ChatMessage } from "@/lib/ai";
 import type { schema } from "@/lib/db";
 import type { PublicProduct } from "@/lib/catalog";
+import type { AgentVoice } from "@/lib/agent-voice";
 import { HUMAN_ORIGIN_MARK } from "@/server/ai/history";
 
 type AgentProfile = typeof schema.agentProfile.$inferSelect;
@@ -42,6 +43,24 @@ export const JUDGE_MARKER = "[JUEZ]";
  */
 export const CLOSING_FAREWELL =
   "Gracias por escribirnos. Cualquier otra duda, acá estamos. ¡Buen día!";
+
+/**
+ * Línea de voz del agente (F6). Compone tratamiento, país y largo desde la
+ * configuración estructurada; el tono libre viaja como matiz. Sin voz
+ * estructurada cae en la línea `Tono:` de antes, y sin nada devuelve null para
+ * no agregar una sección vacía al prompt.
+ */
+export function renderVoice(
+  voice: AgentVoice | null | undefined,
+  tone: string | null | undefined
+): string | null {
+  const matiz = tone?.trim() ?? "";
+  if (!voice) return matiz ? `Tono: ${matiz}` : null;
+  const trato = voice.tratamiento === "usted" ? "usted" : "tú";
+  const largo = voice.largo === "corto" ? "1 a 2" : "2 a 3";
+  const base = `Voz: trato de ${trato}, español de ${voice.pais.trim()}, mensajes de ${largo} líneas.`;
+  return matiz ? `${base} Matices: ${matiz}` : base;
+}
 
 /**
  * Formatea un precio en formato chileno: miles con punto, decimales con coma.
@@ -494,7 +513,7 @@ export function buildAgentSystemPrompt(input: {
   ].join("\n");
   return [
     `Usted es "${profile.name}", el asistente de WhatsApp de este negocio. Responda siempre en el idioma del negocio y con el registro que definen los ajustes de abajo, en mensajes breves y naturales para chat.`,
-    profile.tone ? `Tono: ${profile.tone}` : null,
+    renderVoice(profile.voice, profile.tone),
     profile.instructions ? `Instrucciones del negocio:\n${profile.instructions}` : null,
     profile.escalationRules
       ? `Reglas de escalado a humano:\n${profile.escalationRules}`

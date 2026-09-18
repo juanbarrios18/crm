@@ -9,6 +9,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type { AgentVoice } from "@/lib/agent-voice";
 import { sql } from "drizzle-orm";
 
 /* ============================================================
@@ -378,6 +379,8 @@ export const agentProfile = pgTable(
     instructions: text("instructions"),
     escalationRules: text("escalation_rules"),
     greeting: text("greeting"),
+    /** Voz estructurada (F6): tratamiento, país y largo. `tone` queda como matiz. */
+    voice: jsonb("voice").$type<AgentVoice>(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

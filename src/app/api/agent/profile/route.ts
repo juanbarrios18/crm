@@ -3,6 +3,7 @@ import { apiError, parseBody, withAuth } from "@/lib/api";
 import { getDb, schema } from "@/lib/db";
 import { scoped } from "@/lib/db/tenant";
 import { isAiConfigured } from "@/lib/env";
+import { AgentVoiceSchema } from "@/lib/agent-voice";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ export const GET = withAuth(async (session) => {
       instructions: p.instructions,
       escalationRules: p.escalationRules,
       greeting: p.greeting,
+      voice: p.voice ?? null,
     },
     aiConfigured: isAiConfigured(),
   });
@@ -35,6 +37,8 @@ const putSchema = z.object({
   instructions: z.string().max(8000).nullable().optional(),
   escalationRules: z.string().max(4000).nullable().optional(),
   greeting: z.string().max(1000).nullable().optional(),
+  // F6: voz estructurada; null la borra y el prompt vuelve a la línea `Tono:`.
+  voice: AgentVoiceSchema.nullable().optional(),
 });
 
 export const PUT = withAuth(async (session, req: Request) => {

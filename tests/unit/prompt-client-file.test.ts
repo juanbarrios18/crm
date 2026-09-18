@@ -27,6 +27,7 @@ const PROFILE = {
   instructions: "Ofrece despacho y retiro según las reglas del negocio.",
   escalationRules: "Escala si piden crédito o un humano.",
   greeting: null,
+  voice: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };

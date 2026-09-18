@@ -23,8 +23,13 @@
  * cambio de REGISTRO, no de contenido.
  */
 
+import type { AgentVoice } from "@/lib/agent-voice";
+
 export type BusinessProfileSeed = {
   name: string;
+  /** Voz estructurada (F6): lo que antes iba en prosa dentro de `tone`. */
+  voice: AgentVoice;
+  /** Matiz de tono, opcional: no repite tratamiento, país ni largo. */
   tone: string;
   greeting: string;
   instructions: string;
@@ -33,9 +38,8 @@ export type BusinessProfileSeed = {
 
 export const LAMAS_FOODS_PROFILE: BusinessProfileSeed = {
   name: "Asistente Comercial de Lamas Foods",
-  tone:
-    "Tratamiento: usted. Registro: cordial y profesional, español de Chile. " +
-    "Mensajes de 2 o 3 líneas: es WhatsApp, no un email.",
+  voice: { tratamiento: "usted", pais: "Chile", largo: "medio" },
+  tone: "Cordial y profesional, cercano sin ser informal.",
   // Sin fórmula telefónica ni tercera persona: el agente habla EN NOMBRE del
   // negocio, no "le saluda el equipo".
   greeting:

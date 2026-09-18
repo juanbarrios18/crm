@@ -12,6 +12,7 @@ import {
   ESTADO_DEL_TURNO_NOTA,
   renderAnnotationTurnState,
   renderTurnState,
+  renderVoice,
   TEMPORAL_NOTE_MARK,
 } from "@/server/ai/prompts";
 
@@ -31,6 +32,7 @@ const PROFILE = {
   instructions: "Ofrece despacho y retiro según las reglas del negocio.",
   escalationRules: "Escala si piden crédito o un humano.",
   greeting: null,
+  voice: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -218,5 +220,46 @@ describe("F4 — poda del system prompt (perfil Lamas Foods)", () => {
   it("el cierre determinista no usa fórmula telefónica", () => {
     expect(CLOSING_FAREWELL.toLowerCase()).not.toContain("a la orden");
     expect(CLOSING_FAREWELL.toLowerCase()).not.toContain("disposición");
+  });
+});
+
+describe("F6 — voz estructurada", () => {
+  const voice = { tratamiento: "usted" as const, pais: "Chile", largo: "medio" as const };
+
+  it("compone una sola línea con tratamiento, país y largo, más los matices", () => {
+    const line = renderVoice(voice, "Cordial y cercano.");
+    expect(line).toBe(
+      "Voz: trato de usted, español de Chile, mensajes de 2 a 3 líneas. Matices: Cordial y cercano."
+    );
+  });
+
+  it("omite los matices si el tono libre está vacío", () => {
+    expect(renderVoice(voice, "")).toBe(
+      "Voz: trato de usted, español de Chile, mensajes de 2 a 3 líneas."
+    );
+    expect(renderVoice(voice, null)).not.toContain("Matices");
+  });
+
+  it("corto → 1 a 2 líneas y trato de tú", () => {
+    const line = renderVoice({ tratamiento: "tu", pais: "México", largo: "corto" }, null);
+    expect(line).toContain("trato de tú");
+    expect(line).toContain("español de México");
+    expect(line).toContain("1 a 2 líneas");
+  });
+
+  it("sin voz estructurada cae en la línea de tono de antes, o null si no hay nada", () => {
+    expect(renderVoice(null, "Directo")).toBe("Tono: Directo");
+    expect(renderVoice(undefined, null)).toBeNull();
+    expect(renderVoice(null, "  ")).toBeNull();
+  });
+
+  it("el system usa la línea de voz cuando el perfil la tiene", () => {
+    const prompt = buildAgentSystemPrompt({
+      profile: { ...PROFILE, voice },
+      kb: [],
+      stages: STAGES,
+    });
+    expect(prompt).toContain("Voz: trato de usted, español de Chile");
+    expect(prompt).not.toContain("Tono: Directo y cordial");
   });
 });
