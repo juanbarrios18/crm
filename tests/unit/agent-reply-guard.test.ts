@@ -199,4 +199,31 @@ describe("pipeline: guard determinista de la respuesta (F5)", () => {
     expect(deliveredText()).toBe("Ese dato lo confirmo con el equipo y le escribo.");
     expect(call).toBe(3);
   });
+
+  it("saludo repetido irrecuperable → se entrega la original, no el fallback (PROD run_pk41)", async () => {
+    responses.push(
+      { reply: "Hola, somos el equipo comercial. ¿Qué pan necesita? Cuénteme qué busca." },
+      { stage: "Nuevo" },
+      { reply: "Hola, somos el equipo comercial. ¿Qué pan necesita?" }
+    );
+    pushSelects([
+      { id: "m1", direction: "in", text: "hola", createdAt: new Date(1) },
+      {
+        id: "m2",
+        direction: "out",
+        origin: "ai",
+        aiGenerated: true,
+        text: "Hola, somos el equipo comercial. ¿Qué pan necesita?",
+        createdAt: new Date(2),
+      },
+      { id: "m3", direction: "in", text: "me mandan la boleta al correo?", createdAt: new Date(3) },
+    ]);
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    const { SAFE_FALLBACK_REPLY } = await import("@/server/ai/reply-guard");
+    await runAgentTurn("cv_1");
+    expect(deliveredText()).toBe(
+      "Hola, somos el equipo comercial. ¿Qué pan necesita? Cuénteme qué busca."
+    );
+    expect(deliveredText()).not.toBe(SAFE_FALLBACK_REPLY);
+  });
 });

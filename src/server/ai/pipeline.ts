@@ -24,7 +24,7 @@ import {
   renderAnnotationTurnState,
   renderTurnState,
 } from "@/server/ai/prompts";
-import { guardReply, SAFE_FALLBACK_REPLY } from "@/server/ai/reply-guard";
+import { guardReply, resolveUncorrectedReply } from "@/server/ai/reply-guard";
 import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
 import { notifyHandoff } from "@/server/push/notify";
 
@@ -473,7 +473,8 @@ export async function runAgentTurn(
             else guardViolations += second.violations.length;
           }
         }
-        reply = corrected ?? SAFE_FALLBACK_REPLY;
+        // Con solo violaciones de estilo se conserva la original.
+        reply = corrected ?? resolveUncorrectedReply(reply, first.violations);
       }
     } catch (err) {
       console.error("[guard] error inesperado, se entrega el reply original:", err);
