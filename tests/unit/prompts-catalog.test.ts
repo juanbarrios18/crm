@@ -398,6 +398,15 @@ describe("buildAnnotationSystemPrompt", () => {
     expect(sinCatalogo).not.toContain("PRODUCTOS DEL CATÁLOGO");
   });
 
+  it("sin criterios configurados cae en las instrucciones del negocio (red de seguridad de PROD)", () => {
+    const prompt = buildAnnotationSystemPrompt({
+      profile: { ...PROFILE, instructions: "CONDICIONES COMERCIALES\n- pedido mínimo 15 bolsas" },
+      stages: [{ name: "Nuevo", kind: "open", criteria: null }],
+    });
+    expect(prompt).toContain("CONDICIONES COMERCIALES");
+    expect(prompt).toContain("pedido mínimo 15 bolsas");
+  });
+
 });
 
 describe("renderCatalogVocabulary (P2)", () => {

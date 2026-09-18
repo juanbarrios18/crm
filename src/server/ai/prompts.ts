@@ -558,6 +558,11 @@ export function buildAgentSystemPrompt(input: {
  * - SÍ lleva el VOCABULARIO de productos (`renderCatalogVocabulary`): medido,
  *   mejora la extracción de `productoInteres` y `formato` (+12 a +19 pp).
  *
+ * - SÍ incluye las instrucciones del negocio como RED DE SEGURIDAD cuando
+ *   ninguna etapa tiene `criteria` (organizaciones anteriores a F3): sin
+ *   criterios ni instrucciones la anotación no tiene con qué juzgar el avance.
+ *   Con criterios configurados, el recorte de F3 se mantiene.
+ *
  * No incluye las zonas de envío ni la voz de marca (tono, saludo, reglas de
  * escalado): eso es contexto de conversador. Este system es estable por
  * organización (F1): la etapa actual llega en la nota interna del turno.
@@ -575,11 +580,26 @@ export function buildAnnotationSystemPrompt(input: {
       return `${i + 1}. ${s.name}${tag}${criteria ? ` — ${criteria}` : ""}`;
     })
     .join("\n");
+  // Red de seguridad (medido en PROD, corrida run_pk41lg7gshfsjyyhyhkj): las
+  // organizaciones creadas antes de F3 tienen `pipeline_stage.criteria` en NULL
+  // y el seed no lo completa. Sin criterios NI instrucciones, la anotación no
+  // tiene con qué juzgar el avance y el lead se queda en la primera etapa
+  // (15 de 39 conversaciones). Cuando ninguna etapa trae criterio se incluyen
+  // las instrucciones del negocio como referencia; con criterios configurados,
+  // el recorte de F3 se mantiene.
+  const sinCriteria = !input.stages.some((s) => s.criteria?.trim());
+  const instructionsFallback =
+    sinCriteria && input.profile.instructions
+      ? `Instrucciones del negocio (referencia para reconocer los datos y juzgar el avance; las etapas de arriba no tienen criterio de entrada configurado):\n${input.profile.instructions}`
+      : null;
   return [
     `${ANNOTATION_MARKER} Extraiga datos comerciales del lead de esta conversación. No redacte la respuesta al cliente.`,
-    // F3: las instrucciones del negocio NO viajan acá. El avance se juzga con el
-    // criterio de entrada de cada etapa, que es configuración del CRM.
+    // F3: cuando las etapas traen su criterio de entrada, las instrucciones del
+    // negocio NO viajan acá y el avance se juzga con ese criterio, que es
+    // configuración del CRM. Sin ningún criterio configurado, `instructionsFallback`
+    // las incluye como red de seguridad.
     `Etapas del pipeline con su criterio de entrada (en orden):\n${stageList}`,
+    instructionsFallback,
     // F1: la etapa ACTUAL no va en el system (cambia por turno y rompería el
     // prefijo cacheable). Llega en la nota interna del último mensaje.
     `La etapa actual del lead llega en una nota interna del sistema, marcada con ${TEMPORAL_NOTE_MARK}, al final del último mensaje.`,
