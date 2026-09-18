@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guardReply, SAFE_FALLBACK_REPLY } from "@/server/ai/reply-guard";
+import { guardReply, resolveUncorrectedReply, SAFE_FALLBACK_REPLY } from "@/server/ai/reply-guard";
 import type { PublicProduct } from "@/lib/catalog";
 
 /**
@@ -125,5 +125,70 @@ describe("guardReply — saludo repetido (F5b)", () => {
 
   it("sin saludo configurado no hay nada que comparar", () => {
     expect(guardReply(GREETING, sources, { greeting: null, agentTurnsBefore: 3 }).ok).toBe(true);
+  });
+});
+
+describe("guardReply — no veta cualquier 'Hola' (PROD run_pk41)", () => {
+  const GREETING =
+    "¡Hola! Le saluda el equipo comercial de Lamas Foods. ¿En qué podemos ayudarle con nuestros panes?";
+
+  it("acepta una respuesta que arranca con Hola sin repetir el saludo", () => {
+    const reply =
+      "¡Hola! Su volumen semanal es alto, así que un ejecutivo comercial lo contactará a la brevedad para ofrecerle una propuesta a medida.";
+    expect(guardReply(reply, sources, { greeting: GREETING, agentTurnsBefore: 1 }).ok).toBe(true);
+  });
+
+  it("rechaza el saludo configurado repetido con contenido detrás", () => {
+    const reply =
+      "¡Hola! Le saluda el equipo comercial de Lamas Foods. El despacho a Macul cuesta $5.000.";
+    const out = guardReply(reply, sources, { greeting: GREETING, agentTurnsBefore: 1 });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("saludo_repetido");
+  });
+
+  it("un saludo corto repetido con contenido detrás también se rechaza", () => {
+    const greeting = "Hola, ¿qué necesitas?";
+    expect(guardReply(greeting, sources, { greeting, agentTurnsBefore: 2 }).ok).toBe(false);
+    expect(
+      guardReply(`${greeting} El pan de hamburguesa 12 cm sale $2.220 neto.`, sources, {
+        greeting,
+        agentTurnsBefore: 2,
+      }).ok
+    ).toBe(false);
+    expect(
+      guardReply("Hola, te paso el precio del pan.", sources, { greeting, agentTurnsBefore: 2 }).ok
+    ).toBe(true);
+  });
+});
+
+describe("resolveUncorrectedReply", () => {
+  it("conserva la original si la única violación era el saludo repetido", () => {
+    const original = "¡Hola! Su volumen semanal es alto, un ejecutivo lo contactará.";
+    expect(
+      resolveUncorrectedReply(original, [{ kind: "saludo_repetido", detail: original }])
+    ).toBe(original);
+  });
+
+  it("entrega la respuesta segura si había una violación de hechos", () => {
+    expect(
+      resolveUncorrectedReply("Sale $9.999 neto.", [{ kind: "precio", detail: "$9.999" }])
+    ).toBe(SAFE_FALLBACK_REPLY);
+  });
+
+  it("entrega la respuesta segura si conviven saludo repetido y violación de hechos", () => {
+    expect(
+      resolveUncorrectedReply("¡Hola! Sale $9.999 neto.", [
+        { kind: "saludo_repetido", detail: "¡Hola!" },
+        { kind: "precio", detail: "$9.999" },
+      ])
+    ).toBe(SAFE_FALLBACK_REPLY);
+  });
+
+  it("el fallback seguro no afirma acciones ni usa fórmulas de call center", () => {
+    const lower = SAFE_FALLBACK_REPLY.toLowerCase();
+    expect(lower).not.toContain("le escribo");
+    expect(lower).not.toContain("podemos ayudarle");
+    expect(guardReply(SAFE_FALLBACK_REPLY, sources).ok).toBe(true);
   });
 });
