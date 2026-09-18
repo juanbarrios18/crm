@@ -64,6 +64,8 @@ export type StageDto = {
   name: string;
   position: number;
   kind: "open" | "won" | "lost";
+  /** Criterio de entrada a la etapa (F3); lo lee la anotación del agente. */
+  criteria?: string | null;
 };
 
 export type ContactDto = {

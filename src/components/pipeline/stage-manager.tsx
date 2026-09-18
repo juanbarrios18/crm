@@ -32,6 +32,18 @@ export function StageManager({
     onChanged();
   }
 
+  // F3: criterio de entrada a la etapa; es lo que lee el agente para mover leads.
+  async function setCriteria(stage: StageDto, criteria: string) {
+    const next = criteria.trim();
+    if (next === (stage.criteria ?? "")) return;
+    await fetch(`/api/pipeline/stages/${stage.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ criteria: next || null }),
+    }).catch(() => null);
+    onChanged();
+  }
+
   async function move(stage: StageDto, dir: -1 | 1) {
     const sorted = [...stages].sort((a, b) => a.position - b.position);
     const idx = sorted.findIndex((s) => s.id === stage.id);
@@ -101,11 +113,20 @@ export function StageManager({
         <ul className="space-y-2">
           {sorted.map((s, i) => (
             <li key={s.id} className="flex items-center gap-2">
-              <Input
-                defaultValue={s.name}
-                onBlur={(e) => void rename(s, e.target.value)}
-                className="flex-1"
-              />
+              <div className="flex flex-1 flex-col gap-1">
+                <Input
+                  defaultValue={s.name}
+                  onBlur={(e) => void rename(s, e.target.value)}
+                />
+                <Input
+                  defaultValue={s.criteria ?? ""}
+                  placeholder="Cuándo entra un lead en esta etapa"
+                  aria-label={`Criterio de entrada de ${s.name}`}
+                  maxLength={300}
+                  onBlur={(e) => void setCriteria(s, e.target.value)}
+                  className="text-xs text-muted-foreground"
+                />
+              </div>
               {s.kind !== "open" ? (
                 <Badge variant={s.kind === "won" ? "success" : "secondary"}>
                   {s.kind === "won" ? "ganado" : "perdido"}

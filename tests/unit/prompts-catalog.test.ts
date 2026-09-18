@@ -336,6 +336,23 @@ describe("buildAnnotationSystemPrompt", () => {
     expect(prompt).not.toContain("Reglas de escalado");
   });
 
+  it("NO incluye las instrucciones del negocio: las etapas llevan su criterio (F3)", () => {
+    const prompt = buildAnnotationSystemPrompt({
+      profile: { ...PROFILE, instructions: "CONDICIONES COMERCIALES\n- pedido mínimo 15 bolsas" },
+      stages: [
+        { name: "Nuevo", kind: "open", criteria: "Primer contacto sin producto definido." },
+        { name: "Interesado", kind: "open", criteria: null },
+        { name: "Cliente", kind: "won", criteria: "Confirmó el pago." },
+      ],
+    });
+    expect(prompt).not.toContain("CONDICIONES COMERCIALES");
+    expect(prompt).not.toContain("pedido mínimo 15 bolsas");
+    expect(prompt).toContain("criterio de entrada");
+    expect(prompt).toContain("1. Nuevo — Primer contacto sin producto definido.");
+    expect(prompt).toContain("2. Interesado\n");
+    expect(prompt).toContain("3. Cliente (ganado) — Confirmó el pago.");
+  });
+
   it("prohíbe los marcadores de posición (hallazgo de la medición de F9)", () => {
     const prompt = buildAnnotationSystemPrompt({
       profile: PROFILE,

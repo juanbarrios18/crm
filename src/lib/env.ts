@@ -49,6 +49,9 @@ const envSchema = z.object({
   // aumenta la variedad. chatJson comparte el mismo callProvider, así que la
   // variable alcanza a conversación, anotación y juez por igual.
   OPENROUTER_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
+  // F3: temperatura propia de la ANOTACIÓN. Es extracción, no conversación:
+  // se quiere determinismo. Ausente → 0 (el pipeline lo resuelve así).
+  OPENROUTER_ANNOTATION_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
   ALLOW_SIGNUP: z.string().optional(),
   // Zona horaria del negocio para la línea de fecha y hora del prompt (P6). Se
   // valida contra Intl: un valor inexistente debe fallar al arrancar, no en cada

@@ -518,44 +518,44 @@ export function buildAgentSystemPrompt(input: {
 /**
  * System prompt de la llamada de ANOTACIÓN (segunda llamada del turno).
  *
- * QUÉ SE RECORTA Y QUÉ NO (P2, ajustado por medición):
+ * QUÉ RECIBE Y QUÉ NO (P2 → F3, ajustado por medición):
  *
- * - NO se recorta el contexto del NEGOCIO. El plan proponía sacar las
- *   instrucciones (≈3.000 caracteres) por considerarlas un prompt de
- *   conversador. La medición sobre transcripts reales lo refutó: sin ellas el
- *   agente deja de avanzar de etapa, y **17 de 39 conversaciones terminan en una
- *   etapa distinta** (casi siempre más atrás). Las instrucciones también
- *   describen el PROCESO COMERCIAL, y la etapa se juzga contra ese proceso. La
- *   evidencia y los números están en `docs/bitacora-mejoras-llm.md`, fase F9.
+ * - NO recibe las instrucciones del negocio. Viajaban acá por segunda vez en el
+ *   turno (≈3.000 caracteres) porque, medido en F9, sin ellas la anotación
+ *   dejaba de avanzar de etapa (17 de 39 conversaciones terminaban más atrás):
+ *   la etapa se juzga contra el PROCESO comercial y ese proceso solo existía
+ *   como prosa. F3 lo vuelve dato: cada etapa lleva su CRITERIO DE ENTRADA
+ *   (`pipeline_stage.criteria`, configurable en el CRM) y la anotación juzga el
+ *   avance con eso. La corrida de F3 mide que la etapa final no empeore.
  *
  * - SÍ se recorta el HISTORIAL (`ANNOTATION_HISTORY_LIMIT`): la extracción no
  *   necesita el hilo completo, y es donde está el ahorro real.
  *
- * - SÍ se agrega el VOCABULARIO de productos (`renderCatalogVocabulary`), que
- *   antes no estaba: medido, mejora la extracción de `productoInteres` y
- *   `formato` de forma consistente (del orden de +12 a +19 pp).
+ * - SÍ lleva el VOCABULARIO de productos (`renderCatalogVocabulary`): medido,
+ *   mejora la extracción de `productoInteres` y `formato` (+12 a +19 pp).
  *
  * No incluye las zonas de envío ni la voz de marca (tono, saludo, reglas de
- * escalado): eso sí es contexto de conversador.
+ * escalado): eso es contexto de conversador. Este system es estable por
+ * organización (F1): la etapa actual llega en la nota interna del turno.
  */
 export function buildAnnotationSystemPrompt(input: {
   profile: AgentProfile;
-  stages: { name: string; kind?: string }[];
+  stages: { name: string; kind?: string; criteria?: string | null }[];
   catalog?: PublicProduct[];
 }): string {
   const stageList = input.stages
     .map((s, i) => {
       const tag =
         s.kind === "won" ? " (ganado)" : s.kind === "lost" ? " (perdido)" : "";
-      return `${i + 1}. ${s.name}${tag}`;
+      const criteria = s.criteria?.trim();
+      return `${i + 1}. ${s.name}${tag}${criteria ? ` — ${criteria}` : ""}`;
     })
-    .join(" · ");
+    .join("\n");
   return [
     `${ANNOTATION_MARKER} Extraiga datos comerciales del lead de esta conversación. No redacte la respuesta al cliente.`,
-    input.profile.instructions
-      ? `Instrucciones del negocio (referencia para reconocer los datos y juzgar el avance):\n${input.profile.instructions}`
-      : null,
-    `Etapas del pipeline (en orden): ${stageList}`,
+    // F3: las instrucciones del negocio NO viajan acá. El avance se juzga con el
+    // criterio de entrada de cada etapa, que es configuración del CRM.
+    `Etapas del pipeline con su criterio de entrada (en orden):\n${stageList}`,
     // F1: la etapa ACTUAL no va en el system (cambia por turno y rompería el
     // prefijo cacheable). Llega en la nota interna del último mensaje.
     `La etapa actual del lead llega en una nota interna del sistema, marcada con ${TEMPORAL_NOTE_MARK}, al final del último mensaje.`,

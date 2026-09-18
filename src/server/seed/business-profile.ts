@@ -83,3 +83,21 @@ REGLAS
 - Si declara más de 1.000 panes semanales (alto volumen), escale al equipo comercial.
 - Si pide algo no contemplado (crédito, descuentos, entregas especiales), no lo ofrezca, pero escale para que el equipo lo evalúe.`,
 };
+
+/**
+ * Criterio de entrada por etapa para Lamas Foods (F3). Derivado de las
+ * instrucciones del negocio: es lo que lee la anotación para mover el lead, en
+ * lugar de las instrucciones completas. Editable desde el CRM.
+ */
+export const LAMAS_FOODS_STAGE_CRITERIA: Record<string, string> = {
+  Nuevo:
+    "Primer contacto: el cliente saludó o preguntó algo general y todavía no dijo qué producto busca.",
+  "En conversación":
+    "El cliente dijo qué producto o formato le interesa, o preguntó por precios, cobertura o condiciones.",
+  Interesado:
+    "El cliente pidió una cotización concreta con cantidad, o dijo que quiere avanzar con el pedido, pagar o transferir.",
+  Cliente:
+    "El cliente confirmó el pedido o el pago: transferencia realizada o datos de facturación entregados para cerrar.",
+  Perdido:
+    "El cliente declinó explícitamente o dijo que no va a comprar (no llega al mínimo, es consumidor final, no le interesa).",
+};

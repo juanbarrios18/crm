@@ -233,6 +233,8 @@ export async function runAgentTurn(
       name: schema.pipelineStage.name,
       position: schema.pipelineStage.position,
       kind: schema.pipelineStage.kind,
+      // F3: el criterio de entrada es lo que lee la anotación para mover leads.
+      criteria: schema.pipelineStage.criteria,
     })
     .from(schema.pipelineStage)
     .where(eq(schema.pipelineStage.organizationId, organizationId))
@@ -359,8 +361,10 @@ export async function runAgentTurn(
   // P2: la anotación puede usar su propio modelo (`OPENROUTER_ANNOTATION_MODEL`).
   // Sin la variable, `chatJson` cae a OPENROUTER_MODEL como antes.
   const annotationModel = getEnv().OPENROUTER_ANNOTATION_MODEL;
+  // F3: la extracción es determinista por diseño → temperatura 0 salvo override.
   const annotationPromise = chatJson(LeadExtraction, annotationMessages, {
     model: annotationModel,
+    temperature: getEnv().OPENROUTER_ANNOTATION_TEMPERATURE ?? 0,
   }).then((result) => {
     annotationDoneAt = Date.now();
     return result;
