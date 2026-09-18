@@ -260,3 +260,25 @@ Lecturas:
 - Lo que queda en rojo es de conducta y de código, no de contexto: `cliente_enojado` (pide datos en vez de escalar, e inventa un teléfono "+569XXXXXXX"), `comprador_decidido` ("¿me hacen precio?" → niega en seco sin escalar), `cliente_recurrente` (promete "confirmar stock" y "agregamos a su pedido" sin poder hacerlo). Insumo directo de F4 (poda y reglas de escalado) y F5 (guardrail de afirmaciones).
 - Caché por turno: 4.520 tokens de prompt en el turno 1 y ≈2.600 cacheados desde el turno 4. El techo de esta arquitectura con la anotación actual ronda el 55 % en conversaciones largas; para la meta hacen falta F3 (anotación chica con criterios por etapa) y F4 (poda del system).
 - 2 `judge_failed` por timeout del juez (`This operation was aborted`), igual que en la baseline: conviene subir el timeout del juez o reintentar una vez.
+
+## F3 — anotación con criterios por etapa — corrida `run_gbaasl1cajrpetxw2bnc` (2026-09-18)
+
+Cambio: `pipeline_stage.criteria` (config del CRM, editable en el gestor de etapas); la anotación recibe etapas con criterio en lugar de las instrucciones completas; temperatura 0 en la extracción.
+
+| Métrica | F2 | F3 | Meta |
+|---|---|---|---|
+| Prompt tokens turno 1 (2 llamadas) | 4.520 | **3.804** | — |
+| Facturados por turno | 3.366 | **2.918** | ≤2.200 |
+| % tokens cacheados | 27,6 % | 25,9 % | ≥60 % |
+| Etapa final igual o mejor que F2 | — | 13 de 13 personas | sin regresión |
+| `alucinacion` / `afirmacion_sin_evidencia` | 3 / 6 | 5 / 5 | ≤4 / ≤6 |
+| `debio_escalar` | 4 | 7 | ≤6 |
+| `tono` | 12 | 17 | ≤5 |
+| Personas inestables | 5/13 | 8/13 | — |
+
+Lecturas:
+
+- La anotación bajó ~700 tokens por turno sin perder etapa: `consumidor_final` ahora cierra en Perdido (antes quedaba en Nuevo), `pide_boleta_pago` y `pregunton_precios` avanzan más; `reclama_no_recibido` pasa a Cliente (cumple el criterio literal "confirmó el pago"; revisar si el negocio quiere una etapa distinta para reclamos post-venta).
+- El % de caché baja levemente porque el denominador se achicó: los tokens cacheados absolutos por turno (≈2.100 en el turno 5) son los del system de conversación, que F4 reduce.
+- Los hallazgos del juez suben (`tono` 17, `fuera_de_kb` 7, 8 inestables): ruido del instrumento y, en parte, **confusión introducida por mí**: el seed de F4 (instrucciones 2.947 → 2.724 chars) se aplicó en la base mientras F3 corría, y el pipeline lee el perfil por turno. Los casos posteriores a ese momento vieron un system distinto. Lección para el protocolo: ningún seed ni migración de datos con una corrida en curso.
+- 2 `judge_failed` por timeout, como en todas las corridas.
