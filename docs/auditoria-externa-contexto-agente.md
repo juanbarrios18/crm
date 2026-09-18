@@ -282,3 +282,26 @@ Lecturas:
 - El % de caché baja levemente porque el denominador se achicó: los tokens cacheados absolutos por turno (≈2.100 en el turno 5) son los del system de conversación, que F4 reduce.
 - Los hallazgos del juez suben (`tono` 17, `fuera_de_kb` 7, 8 inestables): ruido del instrumento y, en parte, **confusión introducida por mí**: el seed de F4 (instrucciones 2.947 → 2.724 chars) se aplicó en la base mientras F3 corría, y el pipeline lee el perfil por turno. Los casos posteriores a ese momento vieron un system distinto. Lección para el protocolo: ningún seed ni migración de datos con una corrida en curso.
 - 2 `judge_failed` por timeout, como en todas las corridas.
+
+## F4 — poda y estructura del system — corrida `run_m3yq5vof0xmblb0gdff2` (2026-09-18)
+
+Cambio: N2 en 7 líneas (con escalado explícito), estilo en 6 con un ejemplo, fuentes de verdad declaradas una vez, KB omitida si vacía, catálogo agrupado, cierre determinista natural, seed sin reglas duplicadas. System del perfil sembrado: 10.159 → 8.451 caracteres.
+
+| Métrica | F3 | F4 | Meta |
+|---|---|---|---|
+| Prompt tokens turno 1 (2 llamadas) | 3.804 | **3.418** | — |
+| Facturados por turno | 2.918 | **2.494** | ≤2.200 |
+| % tokens cacheados | 25,9 % | **29,6 %** (70 turnos) | ≥60 % |
+| `alucinacion` / `afirmacion_sin_evidencia` | 5 / 5 | 4 / 5 | ≤4 / ≤6 |
+| `debio_escalar` | 7 | 9 | ≤6 |
+| `tono` | 17 | **12** | ≤5 |
+| Personas inestables | 8/13 | 7/13 | — |
+
+Acumulado desde la baseline: facturados por turno 4.078 → 2.494 (−39 %), caché 10,1 % → 29,6 %.
+
+Lecturas:
+
+- Defecto nuevo visible: en 1 de 3 repeticiones de `reclama_no_recibido` y `cliente_enojado` el agente respondió **el saludo sugerido literal en todos los turnos** (5 turnos del agente en esta corrida, 3 en F3). Es degeneración del modelo chico ante la línea "Saludo sugerido para conversaciones nuevas": la repite como plantilla. Se corrige en F5 con un chequeo determinista (saludo repetido → corrección) además de la regla de estilo.
+- `debio_escalar` 9: `comprador_decidido` × 3 ("¿me hacen precio?") sigue sin escalar aunque N2 lo pide en una línea explícita. `gemini-2.5-flash-lite` no sostiene esa regla con consistencia: candidato a resolverse por código (detección de intención de descuento/crédito → handoff) o con un modelo un escalón arriba (F7).
+- `alucinacion` del juez: 2 de 4 son falsas (listar las comunas con cobertura es correcto; "este canal no gestiona envíos de documentos" es N1). Las reales: "pan de completo 20 cm … bolsa de 6" (es bolsa de 10) y "así podremos emitir su boleta".
+- El % de caché sube con el prompt más chico, pero el techo absoluto por turno baja a ≈1.500 tokens cacheados: lo que queda sin caché es el historial y la anotación, ambos legítimamente variables. La meta de 60 % no es alcanzable con caché de prefijo implícita sobre conversaciones de 5 turnos; el objetivo operativo real es facturados por turno, que ya bajó 39 %.
