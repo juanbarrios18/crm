@@ -218,50 +218,85 @@ export async function judgeCase(input: {
   return { status: "judge_failed", detail: second.detail };
 }
 
-/** Mediana aritmética de una lista no vacía: par → promedio de los dos centrales. */
-function medianOf(puntos: number[]): number {
-  const sorted = [...puntos].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? sorted[mid]!
-    : (sorted[mid - 1]! + sorted[mid]!) / 2;
+/** Media aritmética de una lista no vacía. */
+function meanOf(xs: number[]): number {
+  return xs.reduce((acc, x) => acc + x, 0) / xs.length;
+}
+
+/** Puntos de un veredicto: verde 1 · amarillo 0.5 · rojo 0. `null` si no hay. */
+export function puntosDeVeredicto(veredicto: string | null): number | null {
+  if (veredicto === "verde") return 1;
+  if (veredicto === "amarillo") return 0.5;
+  if (veredicto === "rojo") return 0;
+  return null;
 }
 
 /**
- * Score 0-100 de la corrida: promedio de la MEDIANA por persona (FR-033).
+ * Puntos de un caso: la media de las pasadas del juez cuando está disponible,
+ * y si no el veredicto. `puntos` es `null` en las corridas previas al campo, así
+ * que el fallback mantiene comparables los scores históricos.
+ */
+function puntosDeCaso(caso: {
+  veredicto: string | null;
+  puntos?: number | null;
+}): number | null {
+  if (typeof caso.puntos === "number") return caso.puntos;
+  return puntosDeVeredicto(caso.veredicto);
+}
+
+/**
+ * Score 0-100 de la corrida: promedio de la MEDIA por persona (FR-033).
  *
  * Cada persona se evalúa N veces; para poder atribuir una mejora al agente y no
- * al ruido, el valor de cada persona es la mediana de los puntos de sus
- * repeticiones juzgadas (verde = 1 · amarillo = 0.5 · rojo = 0). `judge_failed`
- * se excluye del cálculo de su persona. El score de la corrida es el promedio
- * de esas medianas, redondeado. Si ninguna persona tiene al menos una
- * repetición juzgada, devuelve null.
+ * al ruido, el valor de cada persona es el promedio de los puntos de sus casos
+ * juzgados (verde = 1 · amarillo = 0.5 · rojo = 0). `judge_failed` se excluye
+ * del cálculo de su persona. El score de la corrida es el promedio de esas
+ * medias, redondeado. Si ninguna persona tiene al menos un caso juzgado,
+ * devuelve null.
  *
- * Compatibilidad: con una sola repetición por persona la mediana es ese valor,
- * así que el score de las corridas anteriores (un caso por persona) no cambia.
+ * POR QUÉ MEDIA Y NO MEDIANA (medido, no opinado):
+ *
+ * Antes cada persona valía la MEDIANA de sus casos. Con 3 repeticiones por
+ * persona la mediana se cuantiza a 0 / 0.5 / 1, así que UNA repetición que
+ * cambie de veredicto mueve la mediana de su persona un escalón completo, y un
+ * escalón vale 100/13 ≈ 7.7 puntos de score. Sobre el material de
+ * `run_ttbdykydfvz7sfb309tk` (39 casos, 3 pasadas del mismo juez), la amplitud
+ * del score entre pasadas era de **7 puntos** con mediana y de **4-5** con
+ * media: la mediana descarta la gradación que la media sí conserva (`puntos`
+ * vale 0.33 o 0.67 y no solo 0 o 1).
+ *
+ * Cada caso aporta su media ya calculada en `puntos` (media de las pasadas del
+ * juez), así que el promedio por persona es la media sobre pasadas ×
+ * repeticiones. Con dos pasadas la amplitud medida baja a **2 puntos**, que es
+ * el umbral a partir del cual una mejora del agente es distinguible del ruido.
  *
  * OJO (P10): el veredicto ya no lo elige el juez sino que se DERIVA del tipo de
- * hallazgo (`deriveVerdict`). La aritmética de acá no cambió, pero el VALOR de
- * un mismo caso puede cambiar: un caso con hallazgo `fuera_de_kb` que antes el
- * juez podía declarar rojo ahora es amarillo. Por eso el score NO es comparable
- * contra corridas anteriores a P10.
+ * hallazgo (`deriveVerdict`). La aritmética de acá no cambió por eso, pero el
+ * VALOR de un mismo caso puede cambiar: un caso con hallazgo `fuera_de_kb` que
+ * antes el juez podía declarar rojo ahora es amarillo. Por eso el score NO es
+ * comparable contra corridas anteriores a P10.
  */
 export function computeScore(
-  cases: { persona: string; status: string; veredicto: string | null }[]
+  cases: {
+    persona: string;
+    status: string;
+    veredicto: string | null;
+    puntos?: number | null;
+  }[]
 ): number | null {
   const porPersona = new Map<string, number[]>();
   for (const c of cases) {
-    if (c.status !== "done" || c.veredicto === null) continue;
-    const puntos =
-      c.veredicto === "verde" ? 1 : c.veredicto === "amarillo" ? 0.5 : 0;
+    if (c.status !== "done") continue;
+    const puntos = puntosDeCaso(c);
+    if (puntos === null) continue;
     const acc = porPersona.get(c.persona) ?? [];
     acc.push(puntos);
     porPersona.set(c.persona, acc);
   }
   if (porPersona.size === 0) return null;
 
-  const medianas = [...porPersona.values()].map((puntos) => medianOf(puntos));
-  const promedio = medianas.reduce((acc, m) => acc + m, 0) / medianas.length;
+  const medias = [...porPersona.values()].map(meanOf);
+  const promedio = medias.reduce((acc, m) => acc + m, 0) / medias.length;
   return Math.round(100 * promedio);
 }
 

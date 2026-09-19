@@ -5,6 +5,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -502,6 +503,16 @@ export const agentTestCase = pgTable(
     }),
     transcript: jsonb("transcript"),
     veredicto: text("veredicto", { enum: ["verde", "amarillo", "rojo"] }),
+    /**
+     * Puntaje continuo del caso (0..1) — la MEDIA de los puntos de las pasadas
+     * del juez (verde 1 · amarillo 0.5 · rojo 0). Existe porque el veredicto
+     * cuantiza: con 3 repeticiones por persona, un cambio de veredicto mueve el
+     * score 100/13 ≈ 7,7 puntos, y la mediana descarta la gradación que sí
+     * conserva la media. Un chequeo determinista que fuerza rojo deja `puntos`
+     * en 0. Es `null` en las corridas anteriores a este campo: ahí el score cae
+     * al veredicto.
+     */
+    puntos: real("puntos"),
     hallazgos: jsonb("hallazgos"),
     // Tiempos de respuesta del modelo (ms): agente (suma de turnos) y juez.
     latencyMs: integer("latency_ms"),
