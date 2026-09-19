@@ -460,9 +460,15 @@ export async function runAgentTurn(
       const sources = { catalog, zones };
       // F5b: cuántas veces habló ya el agente en el hilo, para detectar el
       // saludo repetido. Se cuenta sobre el mismo historial de la llamada.
+      // P2: además, los textos de esos salientes del bot (el turno actual aún
+      // no está persistido) alimentan la detección de respuesta repetida.
+      const previousAgentReplies = history.flatMap((m) =>
+        isBotOutbound(m) && m.text ? [m.text] : []
+      );
       const guardContext = {
         greeting: profile.greeting,
         agentTurnsBefore: history.filter((m) => isBotOutbound(m)).length,
+        previousAgentReplies,
         clientIsNaturalPerson,
         businessText: profile.instructions ?? null,
       };

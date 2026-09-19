@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   guardReply,
+  isRepeatedReply,
   resolveUncorrectedReply,
   SAFE_FALLBACK_REPLY,
   type GuardContext,
@@ -169,11 +170,67 @@ describe("guardReply — no veta cualquier 'Hola' (PROD run_pk41)", () => {
   });
 });
 
+describe("guardReply — respuesta repetida (P2)", () => {
+  // Texto literal del defecto de continuidad en pide_boleta_pago#0: el agente
+  // repite casi palabra por palabra su pregunta anterior tras "transfiero hoy
+  // mismo".
+  const REPEATED =
+    "Por supuesto. Para coordinar, ¿me podría indicar la comuna de su negocio y los productos que necesita? Así le puedo confirmar el detalle y los datos para la transferencia.";
+
+  const context = (previousAgentReplies: readonly string[]): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: previousAgentReplies.length,
+    previousAgentReplies,
+  });
+
+  it("marca la repetición literal de una respuesta previa", () => {
+    expect(isRepeatedReply(REPEATED, context([REPEATED]))).toBe(true);
+    const out = guardReply(REPEATED, sources, context([REPEATED]));
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("respuesta_repetida");
+    expect(out.correction).toContain("repite");
+  });
+
+  it("marca una variante con altísimo solapamiento de palabras", () => {
+    const variant =
+      "Por supuesto. ¿Me podría indicar la comuna de su negocio y los productos que necesita? Así le puedo confirmar el detalle y los datos para la transferencia.";
+    expect(isRepeatedReply(variant, context([REPEATED]))).toBe(true);
+  });
+
+  it("no marca una respuesta nueva y distinta", () => {
+    const other =
+      "Perfecto. Una vez recibido el pago, su pedido entra a producción y las 48 horas comienzan a correr desde ese momento.";
+    expect(isRepeatedReply(other, context([REPEATED]))).toBe(false);
+    expect(guardReply(other, sources, context([REPEATED])).ok).toBe(true);
+  });
+
+  it("no marca la primera vez, sin respuestas previas", () => {
+    expect(isRepeatedReply(REPEATED, context([]))).toBe(false);
+    expect(guardReply(REPEATED, sources, context([])).ok).toBe(true);
+  });
+
+  it("no marca una línea corta de cierre repetida", () => {
+    // Menos de 8 tokens: puede repetirse sin ser un defecto de continuidad.
+    const short = "Gracias, quedo atento.";
+    expect(isRepeatedReply(short, context([short]))).toBe(false);
+  });
+});
+
 describe("resolveUncorrectedReply", () => {
   it("conserva la original si la única violación era el saludo repetido", () => {
     const original = "¡Hola! Su volumen semanal es alto, un ejecutivo lo contactará.";
     expect(
       resolveUncorrectedReply(original, [{ kind: "saludo_repetido", detail: original }])
+    ).toBe(original);
+  });
+
+  it("conserva la original si la única violación era la respuesta repetida", () => {
+    // Es una falla de estilo: la original al menos es informativa y el fallback
+    // genérico perdería la respuesta. Se conserva, igual que el saludo repetido.
+    const original = "Por supuesto. ¿Me indica la comuna de su negocio y los productos?";
+    expect(
+      resolveUncorrectedReply(original, [{ kind: "respuesta_repetida", detail: original }])
     ).toBe(original);
   });
 

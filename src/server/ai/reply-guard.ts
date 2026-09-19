@@ -27,7 +27,8 @@ import {
 export type GuardViolation =
   | FactViolation
   | CommercialViolation
-  | { kind: "saludo_repetido"; detail: string };
+  | { kind: "saludo_repetido"; detail: string }
+  | { kind: "respuesta_repetida"; detail: string };
 
 /** @deprecated alias histórico; use `GuardViolation`. */
 export type Violation = GuardViolation;
@@ -45,6 +46,13 @@ export type GuardContext = {
   clientIsNaturalPerson?: boolean;
   /** Instrucciones del negocio; respaldo de los plazos que el agente cita. */
   businessText?: string | null;
+  /**
+   * 008 P2 — Textos de los salientes del BOT ya enviados en el hilo, antes de
+   * esta respuesta. Se usa un arreglo (no solo la última) porque el defecto es
+   * repetir una respuesta que YA se emitió, y no siempre es la inmediatamente
+   * anterior. El pipeline lo deriva del historial con `isBotOutbound`.
+   */
+  previousAgentReplies?: readonly string[];
 };
 
 export type GuardSources = {
@@ -81,6 +89,8 @@ function describeViolation(v: GuardViolation): string {
       return `Su respuesta afirma "${v.detail}", y este canal no puede ejecutar ni verificar esa acción.`;
     case "saludo_repetido":
       return "Su respuesta repite el saludo inicial. El cliente ya fue saludado: responda a lo que acaba de escribir, sin volver a saludar.";
+    case "respuesta_repetida":
+      return "Su respuesta repite casi literalmente algo que usted ya dijo. El cliente escribió algo nuevo: avance el diálogo, responda al último mensaje o pida solo el dato que falta, sin repetir la misma pregunta.";
     case "elegibilidad_despacho":
       return "Su respuesta ofrece o coordina despacho a un cliente que declaró comprar para uso personal. A una persona natural solo corresponde el retiro en planta.";
     case "despacho_gratuito":
@@ -158,6 +168,53 @@ export function isRepeatedGreeting(reply: string, context: GuardContext): boolea
 }
 
 /**
+ * 008 P2 — Detector de continuidad: el agente repite, casi literal, una
+ * respuesta que ya emitió mientras el cliente preguntó algo nuevo. Medido en
+ * `pide_boleta_pago#0`: tras "perfecto, transfiero hoy mismo" repitió palabra
+ * por palabra la pregunta de comuna y productos del turno anterior.
+ *
+ * El detector es deliberadamente "misma respuesta otra vez": NO mira el turno
+ * del cliente (el guard no lo recibe). Umbrales conservadores para no vetar
+ * respuestas legítimamente parecidas:
+ * - al menos 8 tokens: evita marcar cierres cortos que se repiten sin ser
+ *   defecto ("Gracias, quedo atento.").
+ * - Jaccard de palabras >= 0.9: exige solapamiento casi total; un saludo
+ *   distinto con contenido nuevo queda fuera.
+ */
+const MIN_REPEAT_TOKENS = 8;
+const REPEAT_JACCARD_THRESHOLD = 0.9;
+
+function tokensOf(normalized: string): string[] {
+  return normalized.split(" ").filter(Boolean);
+}
+
+export function isRepeatedReply(reply: string, context: GuardContext): boolean {
+  const previous = context.previousAgentReplies;
+  if (!previous || previous.length === 0) return false;
+  const normReply = normalizeLoose(reply);
+  if (!normReply) return false;
+  const replyTokens = tokensOf(normReply);
+  if (replyTokens.length < MIN_REPEAT_TOKENS) return false;
+  const replySet = new Set(replyTokens);
+
+  for (const prior of previous) {
+    const normPrior = normalizeLoose(prior);
+    if (!normPrior) continue;
+    if (normPrior === normReply) return true;
+    const priorTokens = tokensOf(normPrior);
+    if (priorTokens.length < MIN_REPEAT_TOKENS) continue;
+    const priorSet = new Set(priorTokens);
+    let intersection = 0;
+    for (const token of replySet) {
+      if (priorSet.has(token)) intersection += 1;
+    }
+    const union = replySet.size + priorSet.size - intersection;
+    if (union > 0 && intersection / union >= REPEAT_JACCARD_THRESHOLD) return true;
+  }
+  return false;
+}
+
+/**
  * Mensaje `system` de corrección: cita cada violación y pide responder de
  * nuevo sin ella. Va al FINAL del arreglo de mensajes para no romper el
  * prefijo cacheable.
@@ -178,6 +235,9 @@ export function guardReply(
   const violations: GuardViolation[] = [...checkAgentText(reply, sources)];
   if (context && isRepeatedGreeting(reply, context)) {
     violations.push({ kind: "saludo_repetido", detail: reply.trim() });
+  }
+  if (context && isRepeatedReply(reply, context)) {
+    violations.push({ kind: "respuesta_repetida", detail: reply.trim() });
   }
   // P1: reglas comerciales. Las que no dependen de contexto corren siempre; la
   // elegibilidad exige el hecho declarado y el plazo exige la fuente del negocio.
@@ -202,11 +262,18 @@ export function guardReply(
  * marcó grave). Si TODAS las violaciones originales son de estilo, se entrega
  * la original; si hay una violación de hechos (precio, formato o afirmación),
  * se entrega la respuesta segura.
+ *
+ * 008 P2: `respuesta_repetida` se trata igual que el saludo repetido. Es un
+ * defecto real de continuidad, pero la original al menos responde algo; el
+ * fallback genérico borraría la respuesta entera. La corrección sí se intenta
+ * (el guard igual devuelve `ok: false`), solo que si no prospera se conserva.
  */
 export function resolveUncorrectedReply(
   original: string,
   violations: GuardViolation[]
 ): string {
-  const styleOnly = violations.every((v) => v.kind === "saludo_repetido");
+  const styleOnly = violations.every(
+    (v) => v.kind === "saludo_repetido" || v.kind === "respuesta_repetida"
+  );
   return styleOnly ? original : SAFE_FALLBACK_REPLY;
 }
