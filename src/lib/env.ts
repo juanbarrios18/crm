@@ -52,6 +52,14 @@ const envSchema = z.object({
   // F3: temperatura propia de la ANOTACIÓN. Es extracción, no conversación:
   // se quiere determinismo. Ausente → 0 (el pipeline lo resuelve así).
   OPENROUTER_ANNOTATION_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
+  // 008: presupuesto de tiempo del juez del Laboratorio. El default de
+  // callProvider (60 s) abortaba a los jueces lentos y dejaba el caso sin
+  // veredicto; en la corrida auditada fueron 4 de 39.
+  JUDGE_TIMEOUT_MS: z.coerce.number().int().min(1000).default(120_000),
+  // 008: temperatura propia del juez. Sin fijarla, dos pasadas del mismo
+  // material no son comparables y el piso de ruido mide el muestreo del
+  // proveedor en lugar de la variabilidad del juez.
+  OPENROUTER_JUDGE_TEMPERATURE: z.coerce.number().min(0).max(2).default(0),
   ALLOW_SIGNUP: z.string().optional(),
   // Zona horaria del negocio para la línea de fecha y hora del prompt (P6). Se
   // valida contra Intl: un valor inexistente debe fallar al arrancar, no en cada

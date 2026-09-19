@@ -26,7 +26,8 @@
     "seed:catalog": "esbuild scripts/seed/catalog.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-catalog.mjs --alias:@=./src --packages=external && node .tmp-seed-catalog.mjs",
     "seed:business-profile": "esbuild scripts/seed/business-profile.ts --bundle --platform=node --format=esm --outfile=.tmp-seed-business-profile.mjs --alias:@=./src --packages=external && node .tmp-seed-business-profile.mjs",
     "lab:check": "esbuild scripts/lab-run.ts --bundle --platform=node --format=esm --outfile=.tmp-lab-run.mjs --alias:@=./src --packages=external && node --env-file=.env .tmp-lab-run.mjs --check",
-    "lab:run": "esbuild scripts/lab-run.ts --bundle --platform=node --format=esm --outfile=.tmp-lab-run.mjs --alias:@=./src --packages=external && node --env-file=.env .tmp-lab-run.mjs"
+    "lab:run": "esbuild scripts/lab-run.ts --bundle --platform=node --format=esm --outfile=.tmp-lab-run.mjs --alias:@=./src --packages=external && node --env-file=.env .tmp-lab-run.mjs",
+    "lab:rejudge": "esbuild scripts/lab-rejudge.ts --bundle --platform=node --format=esm --outfile=.tmp-lab-rejudge.mjs --alias:@=./src --packages=external && node --env-file=.env .tmp-lab-rejudge.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

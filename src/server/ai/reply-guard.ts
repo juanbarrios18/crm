@@ -59,6 +59,8 @@ function describeViolation(v: GuardViolation): string {
       return `Su respuesta cita ${v.detail}, que no está en el catálogo ni en las tarifas de despacho.`;
     case "formato":
       return `Su respuesta ofrece ${v.detail}, un formato que ese producto no tiene en el catálogo.`;
+    case "unidades":
+      return `Su respuesta cotiza ${v.detail}. Corrija la cantidad de unidades por bolsa antes de responder.`;
     case "afirmacion":
       return `Su respuesta afirma "${v.detail}", y este canal no puede ejecutar ni verificar esa acción.`;
     case "saludo_repetido":
@@ -103,13 +105,30 @@ const GREETING_PREFIX_CHARS = 20;
  * ese arranque o el saludo completo. Si el saludo es más corto que la ventana,
  * se compara entero y una repetición con contenido detrás también se detecta.
  */
+/**
+ * 008 — Fórmulas que vuelven a saludar en nombre del negocio (auditoría A7).
+ *
+ * La comparación por prefijo del saludo configurado no alcanza: el modelo abre
+ * turnos posteriores con variantes ("Hola, le saluda Lamas Foods") que no
+ * reproducen ese arranque.
+ *
+ * Se exige la FÓRMULA ("le saluda", "somos el equipo"), NO un "Hola" suelto.
+ * Vetar cualquier "Hola" fue el incidente de PROD `run_pk41`: rechazaba
+ * respuestas correctas que empezaban con "¡Hola! Su volumen semanal es alto…".
+ * La fórmula sí distingue un re-saludo de una respuesta con contenido.
+ */
+const REGREETING_FORMULA = /(le saluda|les saluda|somos el equipo|estimado cliente)/;
+
 export function isRepeatedGreeting(reply: string, context: GuardContext): boolean {
   const greeting = context.greeting?.trim();
   if (!greeting || context.agentTurnsBefore < 1) return false;
   const normReply = normalizeLoose(reply);
+  if (!normReply) return false;
   const normGreeting = normalizeLoose(greeting);
   if (!normGreeting) return false;
   if (normReply === normGreeting) return true;
+  // 008: variante con la fórmula del negocio, aunque no copie el arranque.
+  if (REGREETING_FORMULA.test(normReply)) return true;
   const prefix = normGreeting.slice(0, GREETING_PREFIX_CHARS);
   return normReply.startsWith(prefix);
 }

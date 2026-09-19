@@ -26,6 +26,26 @@
 export const HANDOFF_BACKUP_REGEX =
   /(hablar|comunic|contactar|deriv|pas[ae])[\s\S]{0,40}?(asesor|humano|persona|alguien)|atencion humana/;
 
+/**
+ * 008 — Disparadores deterministas que la configuración del negocio YA manda
+ * escalar y que dependían solo del modelo (auditoría A3):
+ *
+ * - Queja o molestia: "Si la persona se muestra molesta o hay una queja, escala".
+ * - Descuento, crédito o entrega especial: "Si pide algo no contemplado
+ *   (crédito, descuentos, entregas especiales), no lo ofrezca, pero escale".
+ *
+ * En la corrida de PROD esto era no determinista: `cliente_enojado` rep0 no
+ * escaló y las repeticiones 1 y 2 sí; el pedido de descuento no escaló nunca.
+ * Como el modelo es el que decidía, la conducta cambiaba entre repeticiones con
+ * el mismo guion.
+ *
+ * Se mantiene el criterio del patrón de respaldo: exigir una señal clara. "Al por
+ * mayor" (el modelo de venta del negocio) NO matchea; "por volumen" o "por
+ * cantidad" sí.
+ */
+export const HANDOFF_ESCALATION_REGEX =
+  /queja|reclamo|molest|enojad|indignad|no me llego|no recibi|me cobraron|pedido incompleto|faltaron|faltan \d|descuento|rebaja|mejor precio|precio por (volumen|cantidad)|si llevo (mas|hart)/;
+
 /** Minúsculas y sin diacríticos, para que las tildes no abran huecos. */
 function normalize(text: string): string {
   return text
@@ -35,5 +55,9 @@ function normalize(text: string): string {
 }
 
 export function matchesHandoffIntent(text: string): boolean {
-  return HANDOFF_BACKUP_REGEX.test(normalize(text));
+  const normalized = normalize(text);
+  return (
+    HANDOFF_BACKUP_REGEX.test(normalized) ||
+    HANDOFF_ESCALATION_REGEX.test(normalized)
+  );
 }

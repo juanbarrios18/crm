@@ -17,6 +17,7 @@ const prefixes = {
   template: "tpl",
   testRun: "run",
   testCase: "case",
+  testJudgment: "jdg",
   mediaAsset: "ma",
   product: "prd",
   productCostMovement: "pcm",

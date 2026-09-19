@@ -449,6 +449,24 @@ export const agentTestRun = pgTable(
     // Modelo del agente y del juez usados en la corrida (Laboratorio).
     model: text("model"),
     judgeModel: text("judge_model"),
+    /**
+     * 008: distingue una corrida real (el agente conversa) de una re-evaluación
+     * (se vuelven a juzgar transcripts ya guardados, sin ejecutar el agente).
+     * `sourceRunId` apunta a la corrida que originó el material y se deja sin FK
+     * para no crear una auto-referencia en la definición de la tabla.
+     */
+    kind: text("kind", { enum: ["run", "rejudge"] })
+      .notNull()
+      .default("run"),
+    sourceRunId: text("source_run_id"),
+    /**
+     * 008: fuentes textuales con las que se juzgó (conocimiento, comportamiento,
+     * catálogo y zonas ya renderizados) más su hash de contenido. Sin esto,
+     * cambiar la configuración del negocio vuelve la corrida irreconstruible y su
+     * verificación no falsable: el prompt del juez se rearma desde la config viva.
+     */
+    configSnapshot: jsonb("config_snapshot"),
+    configHash: text("config_hash"),
     startedAt: timestamp("started_at").notNull().defaultNow(),
     finishedAt: timestamp("finished_at"),
   },
@@ -506,6 +524,46 @@ export const agentTestCase = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("test_case_run_idx").on(t.runId)]
+);
+
+/**
+ * 008 — Juicio del Laboratorio sobre un caso.
+ *
+ * Un caso puede tener varios juicios: la re-evaluación juzga el mismo par
+ * (transcript, configuración) N veces para medir la dispersión del instrumento,
+ * que es el piso de ruido contra el que se decide si un cambio es señal. El
+ * veredicto de `agent_test_case` sigue siendo el de la corrida original; acá
+ * viven las pasadas repetidas, que son observaciones y no resultados de corrida.
+ */
+export const agentTestJudgment = pgTable(
+  "agent_test_judgment",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    /** Corrida de re-evaluación a la que pertenece la pasada. */
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentTestRun.id, { onDelete: "cascade" }),
+    /** Caso cuyo transcript se juzgó, de la corrida origen. */
+    sourceCaseId: text("source_case_id")
+      .notNull()
+      .references(() => agentTestCase.id, { onDelete: "cascade" }),
+    /** Número de pasada (1..N) sobre el mismo material. */
+    pass: integer("pass").notNull(),
+    status: text("status", { enum: ["done", "judge_failed"] })
+      .notNull()
+      .default("done"),
+    veredicto: text("veredicto", { enum: ["verde", "amarillo", "rojo"] }),
+    hallazgos: jsonb("hallazgos"),
+    judgeLatencyMs: integer("judge_latency_ms"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("test_judgment_run_idx").on(t.runId, t.pass),
+    index("test_judgment_case_idx").on(t.sourceCaseId),
+  ]
 );
 
 /* ============================================================
