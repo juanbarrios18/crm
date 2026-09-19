@@ -3,8 +3,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   guardReply,
+  isRepeatedName,
   isRepeatedReply,
   resolveUncorrectedReply,
+  stripContactName,
   SAFE_FALLBACK_REPLY,
   type GuardContext,
 } from "@/server/ai/reply-guard";
@@ -214,6 +216,99 @@ describe("guardReply — respuesta repetida (P2)", () => {
     // Menos de 8 tokens: puede repetirse sin ser un defecto de continuidad.
     const short = "Gracias, quedo atento.";
     expect(isRepeatedReply(short, context([short]))).toBe(false);
+  });
+});
+
+describe("guardReply — nombre repetido (T001)", () => {
+  const CONTACT = "Roberto Gonzalez";
+
+  const context = (over: Partial<GuardContext> = {}): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: 1,
+    previousAgentReplies: [],
+    contactName: CONTACT,
+    ...over,
+  });
+
+  it("marca la segunda mención del nombre (reproducción de PROD)", () => {
+    // Caso real de PROD: el nombre ya apareció en el saludo del agente y el
+    // modelo lo vuelve a usar en cada turno.
+    const firstReply =
+      "Hola, Roberto. Somos el equipo comercial de Lamas Foods, ¿qué necesita?";
+    const reply =
+      "¡Hola Roberto! Qué bueno saber de usted. En La Florida, tenemos pan de completo.";
+    const ctx = context({ previousAgentReplies: [firstReply] });
+
+    expect(isRepeatedName(reply, ctx)).toBe(true);
+    const out = guardReply(reply, sources, ctx);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("nombre_repetido");
+    expect(out.correction).toContain("nombre");
+  });
+
+  it("marca la mención posterior con el nombre al inicio y contenido detrás", () => {
+    const ctx = context({ previousAgentReplies: ["Hola, Roberto."] });
+    const reply = "Roberto, el pedido mínimo para despacho es de 15 bolsas";
+    expect(isRepeatedName(reply, ctx)).toBe(true);
+  });
+
+  it("no veta la PRIMERA mención del nombre (sin salientes previos)", () => {
+    const reply = "Hola, Roberto, ¿en qué le puedo ayudar?";
+    expect(isRepeatedName(reply, context({ previousAgentReplies: [] }))).toBe(false);
+    expect(guardReply(reply, sources, context({ previousAgentReplies: [] })).ok).toBe(true);
+  });
+
+  it("sin nombre en la ficha no evalúa nada", () => {
+    const ctx = context({ contactName: null, previousAgentReplies: ["Hola, Roberto."] });
+    expect(isRepeatedName("Hola, Roberto.", ctx)).toBe(false);
+  });
+
+  it("no evalúa nombres de un solo token de menos de 4 letras", () => {
+    const ctx = context({ contactName: "Ana", previousAgentReplies: ["Hola, Ana."] });
+    expect(isRepeatedName("Hola, Ana.", ctx)).toBe(false);
+  });
+
+  it("no marca cuando el token aparece como parte de otra palabra (comparación por token)", () => {
+    const ctx = context({ contactName: "Rosa", previousAgentReplies: ["Gracias, Rosa."] });
+    expect(isRepeatedName("El pan rosado no aplica.", ctx)).toBe(false);
+  });
+
+  it("stripContactName elimina el nombre y conserva el contenido", () => {
+    expect(
+      stripContactName("Roberto, el pedido mínimo para despacho es de 15 bolsas", CONTACT)
+    ).toBe("El pedido mínimo para despacho es de 15 bolsas");
+  });
+
+  it("stripContactName limpia la puntuación huérfana", () => {
+    expect(
+      stripContactName(
+        "Sí, Roberto. Hacemos despachos en La Florida con un costo de $5.000.",
+        CONTACT
+      )
+    ).toBe("Sí. Hacemos despachos en La Florida con un costo de $5.000.");
+  });
+
+  it("stripContactName devuelve el fallback si el mensaje era solo el nombre", () => {
+    expect(stripContactName("Roberto Gonzalez", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+    expect(stripContactName("Roberto.", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+  });
+
+  it("sin nombre no toca la respuesta", () => {
+    expect(stripContactName("El despacho cuesta $5.000.", null)).toBe(
+      "El despacho cuesta $5.000."
+    );
+  });
+
+  it("resolveUncorrectedReply conserva el contenido sin el nombre, no el fallback", () => {
+    const original = "Roberto, el pedido mínimo para despacho es de 15 bolsas";
+    expect(
+      resolveUncorrectedReply(
+        original,
+        [{ kind: "nombre_repetido", detail: original }],
+        context()
+      )
+    ).toBe("El pedido mínimo para despacho es de 15 bolsas");
   });
 });
 

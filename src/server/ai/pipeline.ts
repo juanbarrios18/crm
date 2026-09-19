@@ -475,6 +475,9 @@ export async function runAgentTurn(
         previousAgentReplies,
         clientIsNaturalPerson,
         businessText: profile.instructions ?? null,
+        // T001: el nombre de la ficha permite vetar sus menciones posteriores a
+        // la primera. Sin ficha, el guard del nombre no evalúa nada.
+        contactName: clientFile?.name ?? null,
       };
       const first = guardReply(reply, sources, guardContext);
       if (!first.ok) {
@@ -503,8 +506,9 @@ export async function runAgentTurn(
             else guardViolations += second.violations.length;
           }
         }
-        // Con solo violaciones de estilo se conserva la original.
-        reply = corrected ?? resolveUncorrectedReply(reply, first.violations);
+        // Con solo violaciones de estilo se conserva la original; el nombre
+        // repetido se entrega sin el nombre (T001).
+        reply = corrected ?? resolveUncorrectedReply(reply, first.violations, guardContext);
       }
     } catch (err) {
       console.error("[guard] error inesperado, se entrega el reply original:", err);

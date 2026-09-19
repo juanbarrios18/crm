@@ -114,9 +114,12 @@ const PROFILE_ROWS = [
   },
 ];
 
-function pushSelects(history: unknown[] = [
-  { id: "m1", direction: "in", text: "cuánto sale?", createdAt: new Date() },
-]) {
+function pushSelects(
+  history: unknown[] = [
+    { id: "m1", direction: "in", text: "cuánto sale?", createdAt: new Date() },
+  ],
+  contactRows: unknown[] = []
+) {
   selectQueue.push(
     CONVERSATION_ROWS,
     PROFILE_ROWS,
@@ -124,7 +127,7 @@ function pushSelects(history: unknown[] = [
     [],
     [{ id: "stg_new", name: "Nuevo", position: 0, kind: "open" }],
     [],
-    [],
+    contactRows,
     []
   );
 }
@@ -225,5 +228,34 @@ describe("pipeline: guard determinista de la respuesta (F5)", () => {
       "Hola, somos el equipo comercial. ¿Qué pan necesita? Cuénteme qué busca."
     );
     expect(deliveredText()).not.toBe(SAFE_FALLBACK_REPLY);
+  });
+
+  it("nombre repetido irrecuperable → se entrega sin el nombre, no el fallback (T001)", async () => {
+    responses.push(
+      { reply: "Roberto, con gusto le ayudo con su consulta." }, // segunda mención
+      { stage: "Nuevo" },
+      { reply: "Roberto, muchas gracias por escribirnos." } // la corrección insiste
+    );
+    pushSelects(
+      [
+        { id: "m1", direction: "in", text: "hola", createdAt: new Date(1) },
+        {
+          id: "m2",
+          direction: "out",
+          origin: "ai",
+          aiGenerated: true,
+          text: "Hola, Roberto. Somos el equipo comercial de Lamas Foods.",
+          createdAt: new Date(2),
+        },
+        { id: "m3", direction: "in", text: "cuánto sale?", createdAt: new Date(3) },
+      ],
+      [{ id: "ct_1", name: "Roberto Gonzalez" }]
+    );
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    const { SAFE_FALLBACK_REPLY } = await import("@/server/ai/reply-guard");
+    await runAgentTurn("cv_1");
+    expect(deliveredText()).toBe("Con gusto le ayudo con su consulta.");
+    expect(deliveredText()).not.toBe(SAFE_FALLBACK_REPLY);
+    expect(call).toBe(3);
   });
 });

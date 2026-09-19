@@ -28,7 +28,8 @@ export type GuardViolation =
   | FactViolation
   | CommercialViolation
   | { kind: "saludo_repetido"; detail: string }
-  | { kind: "respuesta_repetida"; detail: string };
+  | { kind: "respuesta_repetida"; detail: string }
+  | { kind: "nombre_repetido"; detail: string };
 
 /** @deprecated alias histórico; use `GuardViolation`. */
 export type Violation = GuardViolation;
@@ -53,6 +54,14 @@ export type GuardContext = {
    * anterior. El pipeline lo deriva del historial con `isBotOutbound`.
    */
   previousAgentReplies?: readonly string[];
+  /**
+   * T001 — Nombre del contacto según la ficha. El agente debe nombrarlo a lo
+   * sumo UNA vez en toda la conversación; el guard veta las menciones
+   * posteriores. La ficha viaja pegada al último mensaje del cliente en cada
+   * turno, así que el nombre tiene alta saliencia: el prompt por sí solo no
+   * garantiza el "nunca". Opcional: sin ficha no hay nada que vigilar.
+   */
+  contactName?: string | null;
 };
 
 export type GuardSources = {
@@ -91,6 +100,8 @@ function describeViolation(v: GuardViolation): string {
       return "Su respuesta repite el saludo inicial. El cliente ya fue saludado: responda a lo que acaba de escribir, sin volver a saludar.";
     case "respuesta_repetida":
       return "Su respuesta repite casi literalmente algo que usted ya dijo. El cliente escribió algo nuevo: avance el diálogo, responda al último mensaje o pida solo el dato que falta, sin repetir la misma pregunta.";
+    case "nombre_repetido":
+      return "Su respuesta vuelve a nombrar al cliente. El nombre ya se usó UNA vez en la conversación: en los mensajes siguientes se habla sin nombrarlo.";
     case "elegibilidad_despacho":
       return "Su respuesta ofrece o coordina despacho a un cliente que declaró comprar para uso personal. A una persona natural solo corresponde el retiro en planta.";
     case "despacho_gratuito":
@@ -215,6 +226,119 @@ export function isRepeatedReply(reply: string, context: GuardContext): boolean {
 }
 
 /**
+ * T001 — Largo mínimo del token de nombre que se evalúa. Nombres de una sola
+ * sílaba ("Ana", "Sol", "Paz") quedan fuera a propósito: un token de 3 letras o
+ * menos es demasiado corto para distinguirlo de una palabra común sin vetar
+ * respuestas correctas.
+ */
+const MIN_NAME_TOKEN_LENGTH = 4;
+
+/** Tokens del nombre en forma normalizada (minúsculas, sin tildes). */
+function nameTokens(contactName: string): string[] {
+  return tokensOf(normalizeLoose(contactName));
+}
+
+/**
+ * T001 — Detecta que la respuesta vuelve a nombrar al contacto.
+ *
+ * Regla de producto: el nombre aparece COMO MÁXIMO UNA vez en los salientes del
+ * agente. Medido en PROD, el modelo lo repetía en casi cada turno porque la
+ * ficha con `- Nombre:` viaja pegada al último mensaje del cliente en cada
+ * vuelta.
+ *
+ * Conservador por diseño:
+ * - Sin `contactName` (o sin tokens) → `false`.
+ * - Token de detección: el PRIMER token del nombre normalizado ("Roberto", no
+ *   "Roberto Gonzalez"). Exige `MIN_NAME_TOKEN_LENGTH` para evitar falsos
+ *   positivos con palabras cortas.
+ * - Comparación por TOKEN COMPLETO sobre `normalizeLoose`, nunca por substring:
+ *   "rosa" no dispara con "rosa mosqueta" como parte de otra palabra.
+ * - SOLO dispara si el nombre ya apareció en algún saliente previo: la primera
+ *   mención nunca se veta. Sin `previousAgentReplies` → `false`.
+ */
+export function isRepeatedName(reply: string, context: GuardContext): boolean {
+  const contactName = context.contactName?.trim();
+  if (!contactName) return false;
+  const firstToken = nameTokens(contactName)[0];
+  if (!firstToken || firstToken.length < MIN_NAME_TOKEN_LENGTH) return false;
+  const previous = context.previousAgentReplies;
+  if (!previous || previous.length === 0) return false;
+  if (!new Set(tokensOf(normalizeLoose(reply))).has(firstToken)) return false;
+  return previous.some((prior) =>
+    new Set(tokensOf(normalizeLoose(prior))).has(firstToken)
+  );
+}
+
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Primera letra alfabética a mayúscula, sin tocar el resto del texto. */
+function capitalizeFirstLetter(text: string): string {
+  const match = /\p{L}/u.exec(text);
+  if (!match || match.index === undefined) return text;
+  const index = match.index;
+  return text.slice(0, index) + text[index]!.toUpperCase() + text.slice(index + 1);
+}
+
+/**
+ * Limpia la puntuación que quedó huérfana al quitar el nombre: espacios
+ * duplicados, espacio antes de signo, corridas de signos y puntuación inicial.
+ * Las corridas conservan el signo de mayor jerarquía (! > . > ,) para no dejar
+ * un separador suelto donde estaba el nombre.
+ */
+function collapseOrphanPunctuation(text: string): string {
+  const out = text
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,!.])/g, "$1")
+    .replace(/[.!]{2,}/g, (run) => (run.includes("!") ? "!" : "."))
+    .replace(/,[.!]/g, (run) => run.slice(1))
+    .replace(/([.!]),/g, "$1")
+    .replace(/^[\s,!.]+/u, "")
+    .replace(/\s+([,!.])/g, "$1")
+    .trim();
+  return out;
+}
+
+/**
+ * T001 — Respaldo determinista del nombre repetido: entrega el contenido SIN el
+ * nombre en vez del fallback genérico.
+ *
+ * El nombre es una falla de estilo, no de hechos: reemplazar la respuesta por
+ * `SAFE_FALLBACK_REPLY` borraría contenido válido (lección de `run_pk41`: el
+ * fallback genérico perdió el aviso de escalado y el juez lo marcó grave). Se
+ * eliminan las ocurrencias del nombre completo y de sus tokens de largo
+ * suficiente usando lookarounds Unicode `(?<!\p{L})` / `(?!\p{L})`; NO `\b`
+ * porque no reconoce vocales acentuadas. Si tras limpiar no queda contenido con
+ * letras o números, se devuelve `SAFE_FALLBACK_REPLY`.
+ */
+export function stripContactName(
+  reply: string,
+  contactName: string | null | undefined
+): string {
+  const name = contactName?.trim();
+  if (!name) return reply;
+  const normalizedTokens = nameTokens(name);
+  const originalTokens = name.split(/\s+/).filter(Boolean);
+  const needles = [
+    name,
+    ...originalTokens.filter((t) => t.length >= MIN_NAME_TOKEN_LENGTH),
+    normalizeLoose(name),
+    ...normalizedTokens.filter((t) => t.length >= MIN_NAME_TOKEN_LENGTH),
+  ].filter((needle, i, arr) => needle.length > 0 && arr.indexOf(needle) === i);
+  if (needles.length === 0) return reply;
+  // Orden por largo descendente: la forma completa se consume antes que sus
+  // partes para no dejar fragmentos intermedios.
+  const alternation = needles
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+  const pattern = new RegExp(`(?<!\\p{L})(?:${alternation})(?!\\p{L})`, "giu");
+  const stripped = capitalizeFirstLetter(collapseOrphanPunctuation(reply.replace(pattern, "")));
+  if (!/[\p{L}\p{N}]/u.test(stripped)) return SAFE_FALLBACK_REPLY;
+  return stripped;
+}
+
+/**
  * Mensaje `system` de corrección: cita cada violación y pide responder de
  * nuevo sin ella. Va al FINAL del arreglo de mensajes para no romper el
  * prefijo cacheable.
@@ -238,6 +362,12 @@ export function guardReply(
   }
   if (context && isRepeatedReply(reply, context)) {
     violations.push({ kind: "respuesta_repetida", detail: reply.trim() });
+  }
+  if (context && isRepeatedName(reply, context)) {
+    violations.push({
+      kind: "nombre_repetido",
+      detail: context.contactName?.trim() ?? reply.trim(),
+    });
   }
   // P1: reglas comerciales. Las que no dependen de contexto corren siempre; la
   // elegibilidad exige el hecho declarado y el plazo exige la fuente del negocio.
@@ -267,13 +397,26 @@ export function guardReply(
  * defecto real de continuidad, pero la original al menos responde algo; el
  * fallback genérico borraría la respuesta entera. La corrección sí se intenta
  * (el guard igual devuelve `ok: false`), solo que si no prospera se conserva.
+ *
+ * T001: `nombre_repetido` también es estilo. Su respaldo determinista NO es el
+ * fallback genérico sino `stripContactName`: se entrega el contenido sin el
+ * nombre (lección de `run_pk41`: el fallback borró contenido válido y el juez
+ * lo marcó grave). Una violación de hechos sigue mandando al fallback.
  */
 export function resolveUncorrectedReply(
   original: string,
-  violations: GuardViolation[]
+  violations: GuardViolation[],
+  context?: GuardContext
 ): string {
   const styleOnly = violations.every(
-    (v) => v.kind === "saludo_repetido" || v.kind === "respuesta_repetida"
+    (v) =>
+      v.kind === "saludo_repetido" ||
+      v.kind === "respuesta_repetida" ||
+      v.kind === "nombre_repetido"
   );
-  return styleOnly ? original : SAFE_FALLBACK_REPLY;
+  if (!styleOnly) return SAFE_FALLBACK_REPLY;
+  if (violations.some((v) => v.kind === "nombre_repetido")) {
+    return stripContactName(original, context?.contactName);
+  }
+  return original;
 }
