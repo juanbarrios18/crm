@@ -44,17 +44,21 @@ esconder amarillos cambiando expectativas, corridas nuevas del Laboratorio.
 
 - [x] T001 P0 — Verificar SHA-256 de ambos JSONL contra `SHA256SUMS` (coinciden;
       se anota hash y tamaño en el progreso).
-- [ ] T002 P0 — Guard de integridad de evidencia + fixture minimizado con
-      etiquetas humanas (`tests/fixtures/lab/`).
-- [ ] T003 P1a — Elegibilidad de despacho determinista: persona natural no
-      recibe oferta/encaminamiento de despacho; identidad desconocida pregunta.
-- [ ] T004 P1b — Despacho gratuito, "48 horas hábiles" y subtotal vs total.
-- [ ] T005 P1c — Historial y capacidades no simuladas.
-- [ ] T006 P2 — Escalado por precio especial con número y continuidad de boleta.
-- [ ] T007 P3 — Diagnóstico de avance de etapa tras handoff (instrumentación +
-      tests que distingan H1/H2/H3).
-- [ ] T008 P4 — Contradicción de rúbrica del juez + controles negativos.
-- [ ] T009 Verificación — gate técnico completo y E2E si el entorno lo permite.
+- [x] T002 P0 — Guard de integridad de evidencia + fixture minimizado con
+      etiquetas humanas (`tests/fixtures/lab/remediacion-ejf1-cases.json`, 13
+      casos; `tests/unit/lab-remediacion-fixtures.test.ts`).
+- [x] T003 P1a — Elegibilidad de despacho determinista (`commercial-rules.ts`,
+      con guarda de negación para que la respuesta correcta de retiro no caiga).
+- [x] T004 P1b — Despacho gratuito, "48 horas hábiles" y subtotal vs total.
+- [x] T005 P1c — Historial y capacidades no simuladas.
+- [x] T006 P2 — Escalado por precio especial con número, envío de boleta por
+      correo, consulta de historial y detección de respuesta repetida.
+- [x] T007 P3 — Diagnóstico causal: H1 y H3 refutadas por código; H2 necesaria
+      pero no suficiente (2 contraejemplos). Corrección: avance determinista por
+      intención de compra explícita.
+- [x] T008 P4 — Contradicción de rúbrica resuelta en tres categorías; controles
+      de hechos (hábiles, subtotal) y tono; políticas del dueño incorporadas.
+- [x] T009 Verificación — gate técnico verde y E2E de comportamiento 101/101.
 
 ## Criterios de aceptación
 
@@ -78,8 +82,45 @@ mocks si la base está limpia. Sin corridas del Laboratorio.
   = `7c3ae82f…`, 5.334 bytes; `run_ejf1ffwxlmifjeeh315f-cases.jsonl`
   = `9330f818…`, 77.049 bytes; ambos coinciden con `evidence/SHA256SUMS`.
   Reconocimiento de código hecho (pipeline, prompts, reply-guard, handoff,
-  fact-check, runner, judge, snapshot, personas).
+  runner, judge, snapshot, personas).
+
+### Unidades de trabajo (commits)
+
+| Commit | Unidad | Tests |
+|---|---|---|
+| `cf52b1e` | P0 — evidencia congelada + fixture etiquetado | 8 |
+| `32eea88` | P1 — reglas comerciales deterministas | 44 |
+| `f689298` | P2 — escalado y continuidad | 60 |
+| `f6957a7` | P3 — diagnóstico causal de pipeline | 9 |
+| `98c032d` | P3 — avance por intención de compra | 53 |
+| `5e6e837` | P4 — calibración de la rúbrica | 65 |
+| `c534c7a` | E2E — self-test del handoff y la precisión | 101 checks |
+
+### Decisiones del dueño (2026-09-19)
+
+- Consulta de historial: negar Y escalar en el mismo turno.
+- Envío de boleta/factura por correo: negar Y escalar en el mismo turno.
+- Anomalías de pipeline: avance determinista por intención de compra explícita.
+
+### Verificación
+
+- `pnpm typecheck` + `pnpm lint` + `pnpm build` + `pnpm test` en verde.
+- E2E de comportamiento: **101/101**, sobre base recién migrada y sembrada, con
+  `WA_MOCK_ENABLED=true` y `AGENT_COALESCE_MS=0`. El check 005 del arnés dormía
+  2,5 s contra un debounce por defecto de 6 s: era un fallo de tiempo, no de
+  lógica. Ver `tests/e2e/013-remediacion-ejf1.md`.
+
+### Límites honestos
+
+- No se ejecutó ninguna corrida nueva del Laboratorio (no había autorización de
+  coste): la medición de score por estrato queda pendiente de esa autorización.
+- Los 11 fallos de `tests/unit/reply-guard.test.ts` en la suite completa son de
+  otro trabajo concurrente en el mismo worktree (T001–T005, nombre/precios),
+  ajenos a esta tarea: sus 137 tests propios pasan.
+- P1 se validó por contrato determinista y E2E, no por el juez real.
 
 ## Próximo paso
 
-T002: fixture etiquetado e integridad de evidencia.
+Re-medir el Laboratorio por estrato **solo** con autorización de coste, y
+actualizar `specs/008-medicion-contexto-agente/tasks.md` con los resultados
+observados.
