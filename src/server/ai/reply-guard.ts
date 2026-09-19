@@ -1,5 +1,12 @@
 import type { PublicProduct } from "@/lib/catalog";
 import { checkAgentText, type FactViolation } from "@/server/lab/fact-check";
+import {
+  checkDeliveryEligibility,
+  checkFreeDelivery,
+  checkInventedCapability,
+  checkInventedDeadline,
+  type CommercialViolation,
+} from "@/server/ai/commercial-rules";
 
 /**
  * Guardrail determinista de la respuesta ANTES de enviarla (F5).
@@ -19,6 +26,7 @@ import { checkAgentText, type FactViolation } from "@/server/lab/fact-check";
  */
 export type GuardViolation =
   | FactViolation
+  | CommercialViolation
   | { kind: "saludo_repetido"; detail: string };
 
 /** @deprecated alias histórico; use `GuardViolation`. */
@@ -29,6 +37,14 @@ export type GuardContext = {
   greeting?: string | null;
   /** Mensajes del agente ya enviados en el hilo antes de esta respuesta. */
   agentTurnsBefore: number;
+  /**
+   * Hecho DECLARADO por el cliente (no inferido): el pipeline lo calcula con
+   * `declaresNaturalPerson` sobre sus mensajes y descarta la condición si la
+   * ficha tiene datos de empresa. El guard nunca lo adivina.
+   */
+  clientIsNaturalPerson?: boolean;
+  /** Instrucciones del negocio; respaldo de los plazos que el agente cita. */
+  businessText?: string | null;
 };
 
 export type GuardSources = {
@@ -65,6 +81,14 @@ function describeViolation(v: GuardViolation): string {
       return `Su respuesta afirma "${v.detail}", y este canal no puede ejecutar ni verificar esa acción.`;
     case "saludo_repetido":
       return "Su respuesta repite el saludo inicial. El cliente ya fue saludado: responda a lo que acaba de escribir, sin volver a saludar.";
+    case "elegibilidad_despacho":
+      return "Su respuesta ofrece o coordina despacho a un cliente que declaró comprar para uso personal. A una persona natural solo corresponde el retiro en planta.";
+    case "despacho_gratuito":
+      return `Su respuesta ofrece despacho sin costo ("${v.detail}"), y el negocio nunca despacha gratis: el despacho tiene tarifa según la comuna.`;
+    case "plazo_inventado":
+      return `Su respuesta cita el plazo "${v.detail}" con un calificativo que no está en las fuentes del negocio. Copie el plazo tal como aparece en las instrucciones.`;
+    case "capacidad_inventada":
+      return `Su respuesta promete revisar o consultar historial o pedidos ("${v.detail}"), una capacidad que este canal no tiene. Diga que no puede acceder y pida los datos al cliente.`;
   }
 }
 
@@ -154,6 +178,16 @@ export function guardReply(
   const violations: GuardViolation[] = [...checkAgentText(reply, sources)];
   if (context && isRepeatedGreeting(reply, context)) {
     violations.push({ kind: "saludo_repetido", detail: reply.trim() });
+  }
+  // P1: reglas comerciales. Las que no dependen de contexto corren siempre; la
+  // elegibilidad exige el hecho declarado y el plazo exige la fuente del negocio.
+  violations.push(...checkFreeDelivery(reply));
+  violations.push(...checkInventedCapability(reply));
+  if (context?.clientIsNaturalPerson === true) {
+    violations.push(...checkDeliveryEligibility(reply, { clientIsNaturalPerson: true }));
+  }
+  if (typeof context?.businessText === "string") {
+    violations.push(...checkInventedDeadline(reply, context.businessText));
   }
   if (violations.length === 0) return { ok: true };
   return { ok: false, violations, correction: buildCorrection(violations) };

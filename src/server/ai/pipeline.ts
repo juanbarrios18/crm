@@ -14,6 +14,7 @@ import {
   type LeadExtractionType,
 } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
+import { declaresNaturalPerson } from "@/server/ai/commercial-rules";
 import { isBotOutbound, toConversationHistory } from "@/server/ai/history";
 import {
   ANNOTATION_HISTORY_LIMIT,
@@ -284,6 +285,20 @@ export async function runAgentTurn(
     .limit(1);
   const clientFile = contactRows[0] ?? null;
 
+  // P1a — elegibilidad de despacho: persona natural SOLO retiro. Se decide con
+  // hechos DECLARADOS: el cliente lo dijo en el hilo y la ficha no tiene datos
+  // de empresa. La ausencia de datos de empresa, por sí sola, NO convierte a
+  // nadie en persona natural.
+  const inboundTexts = history
+    .filter((m) => m.direction === "in")
+    .map((m) => m.text)
+    .filter((t): t is string => typeof t === "string");
+  const declaredNaturalPerson = inboundTexts.some(declaresNaturalPerson);
+  const knownBusiness = Boolean(
+    clientFile?.empresa || clientFile?.razonSocial || clientFile?.giro
+  );
+  const clientIsNaturalPerson = declaredNaturalPerson && !knownBusiness;
+
   // 005 — contexto comercial: catálogo público + zonas de envío (NUNCA el costo).
   const catalog = await getActiveProductsPublic(organizationId);
   const zones = await getActiveZones(organizationId);
@@ -448,6 +463,8 @@ export async function runAgentTurn(
       const guardContext = {
         greeting: profile.greeting,
         agentTurnsBefore: history.filter((m) => isBotOutbound(m)).length,
+        clientIsNaturalPerson,
+        businessText: profile.instructions ?? null,
       };
       const first = guardReply(reply, sources, guardContext);
       if (!first.ok) {

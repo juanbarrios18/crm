@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { guardReply, resolveUncorrectedReply, SAFE_FALLBACK_REPLY } from "@/server/ai/reply-guard";
+import {
+  guardReply,
+  resolveUncorrectedReply,
+  SAFE_FALLBACK_REPLY,
+  type GuardContext,
+} from "@/server/ai/reply-guard";
 import type { PublicProduct } from "@/lib/catalog";
 
 /**
@@ -190,5 +197,64 @@ describe("resolveUncorrectedReply", () => {
     expect(lower).not.toContain("le escribo");
     expect(lower).not.toContain("podemos ayudarle");
     expect(guardReply(SAFE_FALLBACK_REPLY, sources).ok).toBe(true);
+  });
+
+  it("entrega la respuesta segura si la violación es comercial", () => {
+    const original = "El despacho es sin costo.";
+    expect(
+      resolveUncorrectedReply(original, [
+        { kind: "despacho_gratuito", detail: "despacho sin costo" },
+      ])
+    ).toBe(SAFE_FALLBACK_REPLY);
+  });
+});
+
+describe("guardReply — reglas comerciales (P1)", () => {
+  const FIXTURE = path.join(process.cwd(), "tests/fixtures/lab/remediacion-ejf1-cases.json");
+  const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as {
+    cases: { key: string; transcript: { role: "cliente" | "agente"; text: string }[] }[];
+  };
+  const turnText = (key: string, needle: string): string => {
+    const c = fixture.cases.find((x) => x.key === key);
+    const turn = c?.transcript.find((t) => t.text.includes(needle));
+    if (!turn) throw new Error(`turn not found: ${key} / ${needle}`);
+    return turn.text;
+  };
+  const context = (extra: Partial<GuardContext> = {}): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: 1,
+    ...extra,
+  });
+
+  it("rechaza despacho ofrecido a una persona natural declarada", () => {
+    const reply = turnText("consumidor_final#0", "podemos despachar a domicilio");
+    const out = guardReply(reply, sources, context({ clientIsNaturalPerson: true }));
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("elegibilidad_despacho");
+  });
+
+  it("rechaza el despacho sin costo", () => {
+    const reply = turnText("comprador_decidido#0", "despacho sin costo adicional");
+    const out = guardReply(reply, sources, context());
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("despacho_gratuito");
+  });
+
+  it("rechaza un plazo inventado cuando la fuente no lo respalda", () => {
+    const reply = turnText("comprador_decidido#2", "48 horas hábiles");
+    const out = guardReply(reply, sources, context({ businessText: "producción y 48 horas" }));
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("plazo_inventado");
+  });
+
+  it("rechaza prometer una revisión de historial", () => {
+    const reply = turnText("cliente_recurrente#0", "puedo revisar su historial");
+    const out = guardReply(reply, sources, context());
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("capacidad_inventada");
   });
 });
