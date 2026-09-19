@@ -4,8 +4,11 @@ import { newId } from "@/lib/db/ids";
 import { publish } from "@/server/events/bus";
 import { runAgentTurn } from "@/server/ai/pipeline";
 import type { ChatTiming } from "@/lib/ai";
-import { renderCatalog, renderDeliveryZones, renderKb, renderVoice } from "@/server/ai/prompts";
-import { getActiveProductsPublic, getActiveZones } from "@/server/catalog/queries";
+import {
+  buildGroundTruth,
+  persistSnapshot,
+  toSnapshot,
+} from "@/server/lab/snapshot";
 import { computeScore, judgeCase } from "@/server/lab/judge";
 import { PERSONAS, type Persona } from "@/server/lab/personas";
 import { applyPipelineCheck } from "@/server/lab/pipeline-check";
@@ -131,39 +134,13 @@ async function runAllCases(
       asc(schema.agentTestCase.persona)
     );
 
-  const kbEntries = await db
-    .select()
-    .from(schema.kbEntry)
-    .where(eq(schema.kbEntry.organizationId, organizationId));
-  const kbText = renderKb(kbEntries);
-
-  const profileRows = await db
-    .select()
-    .from(schema.agentProfile)
-    .where(eq(schema.agentProfile.organizationId, organizationId))
-    .limit(1);
-  const profile = profileRows[0];
-  const behaviorText = profile
-    ? [
-        `Nombre: ${profile.name}`,
-        // F6: el juez evalúa contra la voz configurada (estructurada + matiz).
-        renderVoice(profile.voice, profile.tone),
-        profile.instructions ? `Instrucciones: ${profile.instructions}` : null,
-        profile.escalationRules ? `Escalado: ${profile.escalationRules}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n")
-    : "";
-
-  // Ground truth del juez: catálogo público + zonas de envío (FR-030). Sin
-  // esto, el juez tacha de alucinación todo precio/cobertura que el agente
-  // cite correctamente desde el catálogo.
-  // Los objetos se conservan: el chequeo determinista de hechos (F0) compara
-  // precios y formatos contra ellos, no contra el texto rendereado.
-  const catalog = await getActiveProductsPublic(organizationId);
-  const zones = await getActiveZones(organizationId);
-  const catalogText = renderCatalog(catalog);
-  const zonesText = renderDeliveryZones(zones);
+  // 008: las fuentes de verdad se construyen en un solo lugar (`snapshot.ts`) y
+  // se congelan ANTES de juzgar. Si la configuración cambia a mitad de corrida,
+  // cada caso se juzgó contra esta foto; y después de cambiarla, la corrida sigue
+  // siendo reconstruible para volver a juzgarla.
+  const ground = await buildGroundTruth(organizationId);
+  const { kbText, behaviorText, catalogText, zonesText, catalog, zones } = ground;
+  await persistSnapshot(organizationId, runId, toSnapshot(ground));
 
   let done = 0;
   const total = cases.length;

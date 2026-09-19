@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatJson } from "@/lib/ai";
+import { getEnv } from "@/lib/env";
 import { buildJudgePrompt } from "@/server/ai/prompts";
 
 /**
@@ -150,6 +151,13 @@ export async function judgeCase(input: {
   catalogText: string;
   zonesText: string;
 }): Promise<JudgeOutcome> {
+  // 008: temperatura y presupuesto de tiempo del juez son explícitos.
+  // - Temperatura: sin fijarla, dos pasadas del MISMO material no son
+  //   comparables y el piso de ruido mediría el muestreo del proveedor en lugar
+  //   de la variabilidad del juez.
+  // - Timeout: el default de `callProvider` (60 s) abortaba a los jueces lentos y
+  //   dejaba el caso sin veredicto; en la corrida auditada fueron 4 de 39.
+  const env = getEnv();
   const ask = (
     transcript: { role: "cliente" | "agente"; text: string }[]
   ) => {
@@ -169,7 +177,11 @@ export async function judgeCase(input: {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      { judge: true }
+      {
+        judge: true,
+        temperature: env.OPENROUTER_JUDGE_TEMPERATURE,
+        timeoutMs: env.JUDGE_TIMEOUT_MS,
+      }
     );
   };
 

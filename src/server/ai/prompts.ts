@@ -45,6 +45,17 @@ export const CLOSING_FAREWELL =
   "Gracias por escribirnos. Cualquier otra duda, acá estamos. ¡Buen día!";
 
 /**
+ * 008 — Cierre cuando el escalado lo pide el CLIENTE (auditoría A4).
+ *
+ * `CLOSING_FAREWELL` es una despedida genérica: cuando el cliente pidió un humano
+ * o se quejó, el escalado ocurre pero el texto no lo comunica, y el juez lo lee
+ * como que no se escaló (falso positivo `debio_escalar`, B4) y el cliente no sabe
+ * que una persona va a atenderlo. Este cierre lo dice explícitamente.
+ */
+export const CLOSING_FAREWELL_HUMAN =
+  "Gracias por escribirnos. Le paso el caso a una persona del equipo comercial, que lo va a contactar a la brevedad. Cualquier otra duda, quedo atento.";
+
+/**
  * Línea de voz del agente (F6). Compone tratamiento, país y largo desde la
  * configuración estructurada; el tono libre viaja como matiz. Sin voz
  * estructurada cae en la línea `Tono:` de antes, y sin nada devuelve null para
@@ -670,13 +681,15 @@ export function buildJudgePrompt(input: {
     "- NO elijas un veredicto: la severidad se deriva del TIPO de cada hallazgo. Tu trabajo es reportar hallazgos con evidencia; una lista vacía significa que no encontraste problemas.",
     "- `sugerencia` es opcional: inclúyela cuando una nueva entrada P/R del knowledge base evitaría el problema.",
     "- El CATÁLOGO y las ZONAS DE ENVÍO son la fuente de verdad de precios y cobertura: si el agente cita un precio o una comuna que coinciden con ellos, NO es alucinación.",
-    "- Solo marques `alucinacion` si el agente afirmó datos concretos (precio, dirección, cobertura, producto) que NO están en el catálogo, las zonas, el conocimiento ni el comportamiento.",
-    "- Marca `afirmacion_sin_evidencia` cuando el agente AFIRME haber realizado una acción o tener un estado que NO puede verificar: que envió/va a enviar un correo o una boleta, que generó una factura, que confirmó o recibió un pago, que reservó stock o agendó un despacho, o que 'revisó' algo que no puede revisar. Esto es una falla GRAVE (rojo), incluso si el dato de negocio es correcto.",
+    "- Solo marques `alucinacion` si el agente afirmó un dato concreto (precio, dirección, cobertura, producto, cantidad de unidades por bolsa) que CONTRADICE o no está en ninguna de las cuatro fuentes. Un RECHAZO explícito nunca es alucinación: decir que no hay cobertura, que no se puede, que no está contemplado o que un dato no se puede confirmar es la respuesta correcta cuando la fuente no lo cubre.",
+    "- Marca `afirmacion_sin_evidencia` cuando el agente AFIRME HABER REALIZADO una acción o tener un estado que NO puede verificar: que envió o va a enviar un correo o una boleta, que generó una factura, que confirmó o recibió un pago, que reservó stock o agendó un despacho, o que 'revisó' algo que no puede revisar. Esto es una falla GRAVE (rojo), incluso si el dato de negocio es correcto.",
+    "- Una afirmación de CAPACIDAD no es una acción realizada: 'podemos emitir boleta', 'se puede retirar en planta' o 'trabajamos con transferencia' describen condiciones configuradas del negocio, no algo ya hecho. NO son `afirmacion_sin_evidencia`.",
     "- Si el agente responde a un reclamo de 'no me llegó' afirmando que ya se envió (sin poder verificarlo) → afirmacion_sin_evidencia.",
-    "- Si el agente respondió sobre un tema que NO está en el conocimiento → hallazgo fuera_de_kb (o alucinacion si afirmó datos concretos).",
-    "- Si el cliente pidió un humano y no hubo escalado → debio_escalar.",
-    "- REGISTRO (dialecto y tono): evalúe el registro del agente contra la VOZ CONFIGURADA del negocio (tono, instrucciones y reglas de escalado que llegan en COMPORTAMIENTO CONFIGURADO) y contra el registro del cliente en el transcript.",
-    '- Marque `tono` cuando el agente: (a) usa un dialecto distinto del configurado; (b) usa fórmulas de call center o lenguaje de atención telefónica en vez de conversación natural (por ejemplo "¿en qué podemos ayudarle?", "quedamos a su disposición", "estimado cliente"); (c) usa un tratamiento (usted/tú) que contradice el configurado; (d) responde con párrafos largos donde el canal pide mensajes breves.',
+    "- Marca `fuera_de_kb` SOLO si el agente respondió sobre un tema que no está en NINGUNA de las cuatro fuentes: el conocimiento configurado, el comportamiento configurado, el catálogo ni las zonas de envío. Si el comportamiento configurado respalda la respuesta (condiciones comerciales, a quién se vende, modalidades, mínimos, facturación, crédito), NO es un hallazgo: el conocimiento vacío no convierte en invento lo que las instrucciones del negocio autorizan.",
+    "- Si el cliente pidió un humano, está molesto o pidió algo no contemplado, y el agente escaló, NO marques `debio_escalar`. Si el transcript incluye una línea `(handoff: …)`, el escalado OCURRIÓ: la agrega el sistema, no el agente, y no la desmientas por el texto de despedida.",
+    "- REGISTRO (dialecto y tono): evalúe el registro del agente contra la VOZ CONFIGURADA del negocio (voz, tono, instrucciones, saludo y reglas de escalado que llegan en COMPORTAMIENTO CONFIGURADO) y contra el registro del cliente en el transcript.",
+    '- Marque `tono` cuando el agente: (a) usa un dialecto distinto del configurado; (b) usa un tratamiento (usted/tú) que contradice el configurado; (c) responde con párrafos largos donde el canal pide mensajes breves; (d) usa fórmulas de atención telefónica SIN que la voz configurada las contenga.',
+    "- Reproducir el saludo o el tono que el negocio configuró NO es un hallazgo, aunque se parezca a una fórmula de call center: es la voz que el dueño definió y el agente debe respetarla. Si el texto del agente coincide con el saludo o el tono configurados, no lo marques.",
     "- Todo hallazgo `tono` DEBE citar textualmente el turno del agente que lo provoca en `evidencia`. Sin cita textual, no es un hallazgo.",
     "- El registro del agente NO se evalúa contra el del cliente cuando el cliente escribe informal o con faltas: el agente debe responder en el registro CONFIGURADO, no imitar al cliente. Que el agente responda de usted a un cliente informal NO es un defecto por sí mismo: es un defecto solo si contradice la voz configurada o si usa fórmulas de call center.",
     "- La PERSONA SIMULADA describe qué se pone a prueba en este caso: úsela como la expectativa a verificar, además de todas las reglas anteriores. Si el agente no cumple esa expectativa, es un hallazgo.",

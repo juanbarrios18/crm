@@ -6,6 +6,16 @@ vi.mock("@/lib/ai", () => ({
   chatJson: (...args: unknown[]) => chatJson(...args),
 }));
 
+// 008: `judgeCase` lee temperatura y timeout del entorno. En el test el entorno
+// real no está cargado (no hay .env en CI), así que se inyecta el mínimo que la
+// función usa. Sin esto la validación de `getEnv()` falla antes de juzgar.
+vi.mock("@/lib/env", () => ({
+  getEnv: () => ({
+    OPENROUTER_JUDGE_TEMPERATURE: 0,
+    JUDGE_TIMEOUT_MS: 120_000,
+  }),
+}));
+
 import {
   compactTranscript,
   computeDispersion,

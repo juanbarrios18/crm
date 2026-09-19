@@ -21,6 +21,7 @@ import {
   buildAgentSystemPrompt,
   buildAnnotationSystemPrompt,
   CLOSING_FAREWELL,
+  CLOSING_FAREWELL_HUMAN,
   renderAnnotationTurnState,
   renderTurnState,
 } from "@/server/ai/prompts";
@@ -218,7 +219,9 @@ export async function runAgentTurn(
   // Patrón de respaldo ANTES del LLM (FR-022). Se despide con el cierre cordial
   // ANTES de escalar: el agente debe ser siempre el último en escribir.
   if (lastInbound.text && matchesHandoffIntent(lastInbound.text)) {
-    await deliverReply(conversation, CLOSING_FAREWELL);
+    // 008: el cierre depende del motivo. Si lo pidió el cliente (o hay queja),
+    // el texto lo comunica explícitamente; si no, alcanza la despedida.
+    await deliverReply(conversation, CLOSING_FAREWELL_HUMAN);
     await applyHandoff(conversationId, organizationId, "cliente");
     return null;
   }

@@ -50,7 +50,7 @@ CONDICIONES COMERCIALES
 - MODALIDAD DESPACHO: pedido mínimo 15 bolsas (combinables). Se toma con 48 hrs de anticipación. Despachos de lunes a viernes de 8 a 17 hrs.
 - MODALIDAD RETIRO EN PLANTA: pedido mínimo 5 bolsas (combinables). Dirección: Comarca del Caudal 4076, Macul. Lunes a viernes de 9 a 16 hrs. Con 48 hrs de anticipación.
 - PAGO: transferencia previa. El pedido entra a producción al confirmar el pago, y desde ahí corren las 48 hrs.
-- A QUIÉN VENDEMOS: negocio con inicio de actividades → factura (despacho o retiro). Emprendedor sin formalizar → boleta a nombre de la persona (solo retiro). No vendemos a consumidor final para consumo doméstico.
+- A QUIÉN VENDEMOS: negocio con inicio de actividades → factura, con despacho o retiro. Persona natural, con o sin inicio de actividades → solo retiro en planta, con boleta a su nombre. La venta a persona natural NO incluye despacho.
 
 CÓMO OFRECER LAS MODALIDADES
 - Menos de 15 bolsas → ofrezca retiro desde 5. No lo rechace.

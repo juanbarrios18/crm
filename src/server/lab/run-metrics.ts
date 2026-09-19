@@ -82,3 +82,97 @@ export function summarizeRun(cases: RunCaseLike[]): RunSummary {
     guardViolations,
   };
 }
+
+/* ============================================================
+ * 008 — Confiabilidad del instrumento
+ * ============================================================ */
+
+export type JudgeOutcomeLike = {
+  status: string;
+  veredicto: string | null;
+};
+
+/**
+ * Tasa de casos sin veredicto de una corrida.
+ *
+ * `computeScore` los excluye de la mediana de su persona, así que hasta ahora
+ * desaparecían del resultado sin aparecer en ninguna métrica. Un instrumento que
+ * descarta el 10% de los casos en silencio no es medible: acá se hace visible.
+ */
+export function computeJudgeFailureRate(cases: JudgeOutcomeLike[]): {
+  failed: number;
+  total: number;
+  /** Proporción 0..1 de casos sin veredicto. */
+  rate: number;
+} {
+  const total = cases.length;
+  const failed = cases.filter(
+    (c) => c.status !== "done" || c.veredicto === null
+  ).length;
+  return { failed, total, rate: total > 0 ? failed / total : 0 };
+}
+
+export type JudgmentLike = {
+  sourceCaseId: string;
+  pass: number;
+  status: string;
+  veredicto: string | null;
+};
+
+export type CaseDisagreement = {
+  sourceCaseId: string;
+  /** Veredictos observados, en orden de pasada (incluye `null` como "sin veredicto"). */
+  veredictos: (string | null)[];
+  /** Más de un veredicto distinto entre pasadas del MISMO material. */
+  unstable: boolean;
+};
+
+export type Disagreement = {
+  cases: CaseDisagreement[];
+  totalCases: number;
+  unstableCases: number;
+  /**
+   * Piso de ruido: proporción 0..1 de casos que cambian de veredicto entre
+   * pasadas del mismo material. Es la referencia contra la que se decide si una
+   * diferencia de score es señal o variación del juez.
+   */
+  noiseFloor: number;
+};
+
+/**
+ * Dispersión entre pasadas del MISMO material (008).
+ *
+ * Distinta de `computeDispersion` (judge.ts), que mide inestabilidad entre
+ * repeticiones DISTINTAS de una persona — donde el material también cambia. Acá
+ * el transcript es idéntico y lo único que varía es el juez, así que esto sí es
+ * el ruido del instrumento.
+ */
+export function computeDisagreement(
+  judgments: JudgmentLike[]
+): Disagreement {
+  const byCase = new Map<string, (string | null)[]>();
+  for (const judgment of [...judgments].sort((a, b) => a.pass - b.pass)) {
+    const acc = byCase.get(judgment.sourceCaseId) ?? [];
+    acc.push(
+      judgment.status === "done" ? judgment.veredicto : null
+    );
+    byCase.set(judgment.sourceCaseId, acc);
+  }
+
+  const cases: CaseDisagreement[] = [...byCase.entries()].map(
+    ([sourceCaseId, veredictos]) => ({
+      sourceCaseId,
+      veredictos,
+      unstable: new Set(veredictos).size > 1,
+    })
+  );
+  const unstableCases = cases.filter((c) => c.unstable).length;
+  const totalCases = cases.length;
+
+  return {
+    cases,
+    totalCases,
+    unstableCases,
+    noiseFloor: totalCases > 0 ? unstableCases / totalCases : 0,
+  };
+}

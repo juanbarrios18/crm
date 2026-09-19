@@ -52,7 +52,18 @@ const orgs = explicitOrg
       .from(schema.organization)
       .where(eq(schema.organization.id, explicitOrg))
       .limit(1)
-  : await db.select().from(schema.organization).limit(1);
+  : await db.select().from(schema.organization);
+
+// 008 (C3): con más de una organización, elegir la primera en silencio es un
+// footgun. La organización se declara siempre.
+if (!explicitOrg && orgs.length > 1) {
+  console.error(
+    `[seed] Hay ${orgs.length} organizaciones: indique cuál con --org=<id>`
+  );
+  await sql.end();
+  process.exit(1);
+}
+
 const org = orgs[0];
 if (!org) {
   console.error(
@@ -68,13 +79,26 @@ const existing = await db
   .where(eq(schema.agentProfile.organizationId, org.id))
   .limit(1);
 
+// 008 (C3, opción B): el seed NO sobrescribe una configuración existente.
+//
+// Antes hacía `.set(patch)` incondicional, así que cualquier ajuste que el dueño
+// hiciera desde el CRM se perdía en el próximo seed, sin aviso. Ahora solo crea
+// cuando no existe; para actualizar hay que pedirlo explícitamente con --force.
+const force = process.argv.includes("--force");
 const patch = { ...LAMAS_FOODS_PROFILE, updatedAt: new Date() };
 
 if (existing[0]) {
-  await db
-    .update(schema.agentProfile)
-    .set(patch)
-    .where(eq(schema.agentProfile.id, existing[0].id));
+  if (force) {
+    await db
+      .update(schema.agentProfile)
+      .set(patch)
+      .where(eq(schema.agentProfile.id, existing[0].id));
+  } else {
+    console.log(
+      "[seed] La configuración ya existe: no se sobrescribe. " +
+        "Use --force para actualizarla desde este archivo."
+    );
+  }
 } else {
   await db.insert(schema.agentProfile).values({
     id: newId("agentProfile"),

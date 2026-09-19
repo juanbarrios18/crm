@@ -72,6 +72,13 @@ const FORBIDDEN_CLAIMS: readonly RegExp[] = [
   `${INI}(?:recibimos|confirmamos|verifiqué|revisé)\\s+(?:su|el|tu|la)\\s+(?:pago|transferencia)${FIN}`,
   `${INI}pago\\s+confirmado${FIN}`,
   `${INI}(?:reservé|reservamos)\\s+(?:el\\s+)?stock${FIN}`,
+  // 008 — verbos medidos en la corrida de PROD (auditoría A2): el agente
+  // afirmaba haber procesado un pedido, haber agregado líneas o estar
+  // revisando un caso, acciones que este canal no ejecuta.
+  `${INI}(?:ya\\s+)?(?:se\\s+)?(?:procesamos|procesé|procesó)${FIN}`,
+  `${INI}${PRON}(?:agregamos|agregué|añadimos|sumamos)${FIN}`,
+  `${INI}(?:estamos|estoy)\\s+revisando${FIN}`,
+  `${INI}(?:anotad|registrad)(?:o|a|os|as)${FIN}`,
 ].map((source) => new RegExp(source));
 
 function findForbiddenClaim(text: string): string | null {
@@ -161,9 +168,28 @@ function fmtCl(n: number): string {
  * corrección que el pipeline le devuelve al modelo (F5, `reply-guard.ts`).
  */
 export type FactViolation = {
-  kind: "precio" | "formato" | "afirmacion";
+  kind: "precio" | "formato" | "unidades" | "afirmacion";
   detail: string;
 };
+
+/**
+ * Cantidad de unidades por bolsa por par (producto, formato) normalizados.
+ *
+ * La clave es el PAR y no el producto: el mismo "Pan de completo" tiene 12, 10 y
+ * 6 unidades según el formato (15, 20 y 30 cm). Validar contra el conjunto del
+ * producto no detectaría nada, porque la cantidad equivocada pertenece a otra
+ * fila del mismo producto — que es exactamente el defecto A1 medido en PROD.
+ */
+function unitsByProductFormat(catalog: PublicProduct[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const p of catalog) {
+    map.set(
+      `${normalize(p.producto)}|${normalize(p.formato)}`,
+      p.unidadesPorBolsa
+    );
+  }
+  return map;
+}
 
 /**
  * Núcleo puro y reutilizable: verifica UN texto del agente contra las fuentes
@@ -208,7 +234,38 @@ export function checkAgentText(
     }
   }
 
-  // 3. Afirmaciones que el canal no puede hacer.
+  // 3. Cantidad de unidades por bolsa contra el par (producto, formato).
+  //    Solo se evalúa cuando el turno nombra UN par: con varios pares no se
+  //    puede atribuir la cantidad sin ambigüedad, y un falso positivo acá fuerza
+  //    rojo.
+  const unidades = [...norm.matchAll(/(\d+)\s*unidad(?:es)?\b/g)].map((m) =>
+    Number(m[1])
+  );
+  if (unidades.length > 0) {
+    const pares: { par: string; producto: string; formato: string; delCatalogo: number }[] =
+      [];
+    for (const [par, delCatalogo] of unitsByProductFormat(sources.catalog)) {
+      const [producto, formato] = par.split("|");
+      if (!producto || !formato) continue;
+      if (norm.includes(producto) && norm.includes(formato)) {
+        pares.push({ par, producto, formato, delCatalogo });
+      }
+    }
+    if (pares.length === 1) {
+      const p = pares[0]!;
+      const declaradas = [...new Set(unidades)];
+      if (!declaradas.includes(p.delCatalogo)) {
+        push(`unidades:${p.par}:${declaradas.join(",")}`, {
+          kind: "unidades",
+          detail:
+            `"${p.producto}" en formato ${p.formato} con bolsa de ` +
+            `${declaradas.join(" o ")} unidades (el catálogo dice ${p.delCatalogo})`,
+        });
+      }
+    }
+  }
+
+  // 4. Afirmaciones que el canal no puede hacer.
   const claim = findForbiddenClaim(text);
   if (claim) push(`claim:${claim}`, { kind: "afirmacion", detail: claim });
 
@@ -222,6 +279,8 @@ function describeFinding(turno: number, v: FactViolation, text: string): string 
       return `El turno ${turno} del agente cita ${v.detail}, que no está en el catálogo ni en las tarifas de despacho: ${cita}`;
     case "formato":
       return `El turno ${turno} del agente ofrece ${v.detail}, que ese producto no tiene en el catálogo: ${cita}`;
+    case "unidades":
+      return `El turno ${turno} del agente cotiza ${v.detail}: ${cita}`;
     case "afirmacion":
       return `El turno ${turno} del agente afirma una acción que el canal no puede ejecutar ("${v.detail}"): ${cita}`;
   }

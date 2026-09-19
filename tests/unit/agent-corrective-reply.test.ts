@@ -193,7 +193,7 @@ describe("pipeline: corrección cuando la acción no trae respuesta", () => {
     );
 
     const { runAgentTurn } = await import("@/server/ai/pipeline");
-    const { CLOSING_FAREWELL } = await import("@/server/ai/prompts");
+    const { CLOSING_FAREWELL_HUMAN } = await import("@/server/ai/prompts");
     await runAgentTurn("cv_2");
 
     const reply = inserts.find(
@@ -203,7 +203,9 @@ describe("pipeline: corrección cuando la acción no trae respuesta", () => {
         (i.values as { direction?: string }).direction === "out"
     );
     expect(reply).toBeDefined();
-    expect((reply!.values as { text: string }).text).toBe(CLOSING_FAREWELL);
+    // 008: cuando el escalado lo pide el cliente, el cierre comunica que una
+    // persona va a atender el caso (auditoría A4), no la despedida genérica.
+    expect((reply!.values as { text: string }).text).toBe(CLOSING_FAREWELL_HUMAN);
     expect(graphRequest).not.toHaveBeenCalled();
   });
 });
