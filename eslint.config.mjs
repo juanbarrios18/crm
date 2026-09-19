@@ -12,6 +12,10 @@ const config = [
       "scripts/**",
       "next-env.d.ts",
       ".tmp-*.mjs",
+      // Skills de terceros instalados con `npx skills` (solo Markdown/Python).
+      // Contenido vendorizado: no es fuente de la app y no se lintea.
+      ".agents/**",
+      ".claude/**",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
