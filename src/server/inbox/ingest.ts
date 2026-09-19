@@ -63,7 +63,7 @@ export function isInboundMediaBlocked(
 
 /** Aviso que se responde cuando llega un adjunto con el gate activo. */
 const INBOUND_MEDIA_BLOCKED_NOTICE =
-  "Por ahora no puedo recibir archivos adjuntos por WhatsApp. Envíeme un mensaje de texto y te ayudo en seguida.";
+  "Por ahora no puedo recibir archivos adjuntos por WhatsApp. Envíeme un mensaje de texto y lo ayudo en seguida.";
 
 type MediaInput = {
   kind: (typeof schema.mediaAsset.$inferSelect)["kind"];
