@@ -136,6 +136,9 @@ describe("registro — guardián de voseo rioplatense", () => {
 
     expect(matches("Agregá el primero con el botón de arriba.")).toBe(true);
     expect(matches("Si tenés dudas, escribinos.")).toBe(true);
+    // T002: el aviso de adjuntos bloqueados usaba "Enviame"; el guardián debe
+    // cazarlo si vuelve en cualquier superficie.
+    expect(matches("Enviame un mensaje de texto y te ayudo.")).toBe(true);
     expect(matches("¿Armamos su pedido?")).toBe(false);
     expect(matches("El costo está acá y además es más barato; jamás sube.")).toBe(
       false

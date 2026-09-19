@@ -80,6 +80,8 @@ export const VOSEO_LEXEMES = [
   "seguí",
   "fijate",
   "acordate",
+  // Hueco del aviso de adjuntos bloqueados (T002): el guardián no lo cazaba.
+  "enviame",
   // Presente del indicativo (2ª persona voseo)
   "tenés",
   "podés",
