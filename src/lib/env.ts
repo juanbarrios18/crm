@@ -55,11 +55,29 @@ const envSchema = z.object({
   // 008: presupuesto de tiempo del juez del Laboratorio. El default de
   // callProvider (60 s) abortaba a los jueces lentos y dejaba el caso sin
   // veredicto; en la corrida auditada fueron 4 de 39.
-  JUDGE_TIMEOUT_MS: z.coerce.number().int().min(1000).default(120_000),
+  /**
+   * Presupuesto de tiempo del juez del Laboratorio. El default de `callProvider`
+   * (60 s) dejaba sin veredicto a los jueces lentos, y con 120 s el piso de ruido
+   * seguía cobrándose casos: en la corrida auditada la latencia máxima observada
+   * fue 114 s y una pasada abortó con "This operation was aborted". 240 s deja
+   * margen sobre la cola real sin volver el turno inmanejable.
+   */
+  JUDGE_TIMEOUT_MS: z.coerce.number().int().min(1000).default(240_000),
   // 008: temperatura propia del juez. Sin fijarla, dos pasadas del mismo
   // material no son comparables y el piso de ruido mide el muestreo del
   // proveedor en lugar de la variabilidad del juez.
   OPENROUTER_JUDGE_TEMPERATURE: z.coerce.number().min(0).max(2).default(0),
+  /**
+   * Pasadas del juez por caso en una corrida del Laboratorio. Una sola pasada
+   * cuantiza el caso y un escalón de una persona mueve el score 100/13 ≈ 7,7
+   * puntos. Medido sobre el material de `run_jc1a0i0ts2kkl20sqecl` (39 casos sobre
+   * la configuración vigente): la amplitud del score entre subconjuntos de
+   * pasadas es 7 con una pasada, 4 con dos y **2 con tres**, que es el umbral
+   * acordado para distinguir una mejora del agente del ruido del instrumento.
+   * Las pasadas corren en PARALELO, así que subir el número no agrega latencia:
+   * solo tokens del juez, que es el modelo barato.
+   */
+  LAB_JUDGE_PASSES: z.coerce.number().int().min(1).max(5).default(3),
   ALLOW_SIGNUP: z.string().optional(),
   // Zona horaria del negocio para la línea de fecha y hora del prompt (P6). Se
   // valida contra Intl: un valor inexistente debe fallar al arrancar, no en cada
