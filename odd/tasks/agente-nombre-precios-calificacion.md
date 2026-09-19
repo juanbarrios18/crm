@@ -66,6 +66,54 @@ tocar la config del negocio en la base, corridas del Laboratorio.
       la regla de precios (familias primero, acotar, cotizar solo la opción elegida);
       agregar calificación proactiva de los datos que falten.
 - [x] T004 — Verificación: gate técnico completo; E2E si la base está limpia.
+- [x] T005 — Corrección del BLOCKER de la verificación independiente: el guard
+      no distingue vocativo de coincidencia léxica. Ver "Hallazgos de la
+      verificación" más abajo.
+
+## Hallazgos de la verificación independiente (2026-09-19)
+
+La verificación adversarial devolvió `FINDINGS` con un BLOCKER que impide
+mergear el guard tal como quedó.
+
+- **BLOCKER — el guard mide coincidencia de token, no uso vocativo.**
+  `isRepeatedName` cuenta como "nombre ya usado" cualquier aparición del token
+  en un saliente previo. Caso real: `Santiago` es comuna del catálogo y nombre
+  chileno; con `contactName: "Santiago Perez"` y el saliente previo "Hacemos
+  despachos en Santiago con un costo de $5.000.", la respuesta "El despacho a
+  Santiago cuesta $5.000." queda vetada y `stripContactName` la entrega como
+  "El despacho a cuesta $5.000." — se borra la comuna. Mismo patrón con
+  "La rosa mosqueta" (nombre "Rosa Diaz") y con contactos cuyo `name` es una
+  empresa ("En Panaderia El Trigo, ..." → "En, el despacho...").
+  Esto es PEOR que el fallo original: corrompe mensajes correctos de todos los
+  negocios.
+- **MAJOR — puntuación huérfana**: `stripContactName` no maneja `¿ ¡ : ; ( ) —`
+  y mayusculiza en mitad de oración ("¿Roberto, me confirma la comuna?" →
+  "¿, Me confirma la comuna?").
+- **MINOR — contradicciones del prompt**: `prompts.ts:459` prohíbe listar varios
+  formatos con precio a la vez y `:460` conserva "si cotiza más de una opción,
+  líneas separadas con guion"; `:457` ("una pregunta por mensaje") contradice el
+  bullet de calificación ("de a una o dos preguntas").
+- **MINOR — comentario y test falsos**: el comentario de `reply-guard.ts` afirma
+  que "rosa" no dispara con "rosa mosqueta", pero SÍ dispara.
+- **MINOR — cobertura**: falta el test que reproduce PROD msg2/4/8/10, el caso de
+  corrección exitosa y los casos de falso positivo.
+- **SUGGESTION**: `resolveUncorrectedReply(..., context?)` opcional desactiva el
+  guard en silencio si un llamador futuro lo omite.
+
+### Diseño corregido del vocativo (T005)
+
+Una aparición del nombre es VOCATIVO —y por lo tanto contable y removible— solo
+si, saltando espacios hacia atrás, está al inicio del texto, o precedida por
+`, ; : ¡ ¿ ( — – -`, o precedida por una interjección de saludo (`hola`,
+`buenas`, `buenos`). NO se considera vocativo cuando la precede un artículo o
+preposición (`en`, `a`, `de`, `para`, `con`, `la`, `el`...), que es el caso de
+las comunas y productos del catálogo.
+
+`isRepeatedName` dispara solo si el respuesta usa el nombre como vocativo Y algún
+saliente previo también lo usó como vocativo. `stripContactName` elimina SOLO
+las apariciones vocativas, consumiendo el delimitador interior (el anterior si
+existe; si no, un `, ; :` posterior), y normaliza la puntuación sin mayusculizar
+en mitad de oración.
 
 ## Diseño del guard del nombre (T001)
 
@@ -147,9 +195,21 @@ mocks si la base está limpia. Sin corridas del Laboratorio.
   build anterior, no por los cambios). E2E NO ejecutado: la base por defecto y
   todas las bases `vocero_e2e_*` tienen mensajes de corridas previas (16-20), y
   el self-test no es idempotente sobre una base usada.
+- 2026-09-19: T005 implementado. RED observado: 11 tests nuevos en
+  `reply-guard.test.ts` fallando por la razón correcta (Santiago/rosa/empresa se
+  vetaban; strip dejaba `¿, Me...`; no había tope de largo en el strip). GREEN:
+  detección por vocativo (`isVocativeAt`/`hasVocativeToken`) y strip por tramos
+  vocativos (`findVocativeSpans`), con ancla en el primer token del nombre.
+  `resolveUncorrectedReply` con `context` requerido; `pipeline.ts` sin cambios
+  (ya lo pasaba). Prompt: se elimina la viñeta de "líneas separadas con guion"
+  y la calificación pasa a "una pregunta por mensaje"; F4 queda en 8.422 (margen
+  78). Regresión detectada durante la verificación: un nombre con tilde ("José")
+  no coincidía porque el token normalizado se buscaba sobre el texto crudo; se
+  corrige recorriendo palabras con `wordSpans` y se agrega test. Gate: 663 tests
+  en verde, typecheck/lint/build OK.
 
 ## Próximo paso
 
-Tareas T001-T004 cerradas. Pendiente sugerido: corrida del Laboratorio (no
+Tareas T001-T005 cerradas. Pendiente sugerido: corrida del Laboratorio (no
 autorizada en esta unidad) para medir adherencia del prompt de nombre y precios
 con el modelo real.
