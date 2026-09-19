@@ -399,3 +399,17 @@ antes de confiar en el score.
   `agent_profile`, `pipeline_stage` y `kb_entry`**; las otras 20 tablas quedaron
   idénticas. Etapas con criterio 5/5, voz en usted, C4 coherente, `kb_entry` en 0.
   T507 (corrida 1 de 5) sigue pendiente.
+- 2026-09-19 (piso de ruido): reproducido el piso publicado sobre
+  `run_ttbdykydfvz7sfb309tk` y descompuesto por causa. La métrica ya no cuenta
+  `judge_failed` como desacuerdo (antes 1 de las 6 inestabilidades era un timeout,
+  no una discrepancia del juez). Correcciones de rúbrica sobre casos reales
+  (verificación de listas contra la fuente, negación ≠ `afirmacion_sin_evidencia`,
+  declinar no exime de escalar, precedencia entre tipos) y `JUDGE_TIMEOUT_MS` a
+  240 s. Ronda 1: piso **10,3 % (4/39)** y **0 fallos** (antes 12,8 % con la
+  métrica corregida y 1/117). **Hallazgo central**: la amplitud del score entre
+  pasadas seguía en 7 puntos porque la mediana por persona cuantiza; se cambió a
+  media (`FR-033`), se agregó `agent_test_case.puntos` (media de las pasadas) y
+  `LAB_JUDGE_PASSES=2` en el runner. Amplitud medida con el nuevo estimador:
+  **2 puntos**. Evidencia completa en `evidence/piso-ruido-2026-09-19.md`.
+  Pendiente: confirmar la amplitud ≤ 2 en una corrida del Laboratorio en vivo y
+  re-anotar los scores históricos (la media cambia el valor publicado).

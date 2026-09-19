@@ -92,6 +92,7 @@ describe("computeDisagreement (008) — piso de ruido", () => {
       j("c1", 3, "verde"),
     ]);
     expect(out.unstableCases).toBe(0);
+    expect(out.evaluableCases).toBe(1);
     expect(out.noiseFloor).toBe(0);
   });
 
@@ -104,16 +105,51 @@ describe("computeDisagreement (008) — piso de ruido", () => {
     ]);
     expect(out.unstableCases).toBe(1);
     expect(out.totalCases).toBe(2);
+    expect(out.evaluableCases).toBe(2);
     expect(out.noiseFloor).toBe(0.5);
     expect(out.cases.find((c) => c.sourceCaseId === "c1")?.unstable).toBe(true);
   });
 
-  it("un veredicto nulo cuenta como valor distinto: el fallo del juez es ruido", () => {
+  it("una pasada fallida NO es desacuerdo: sale del piso y se reporta aparte", () => {
+    const out = computeDisagreement([
+      j("c1", 1, "verde"),
+      j("c1", 2, null, "judge_failed"),
+      j("c1", 3, "verde"),
+    ]);
+    expect(out.unstableCases).toBe(0);
+    expect(out.noiseFloor).toBe(0);
+    expect(out.failedPasses).toBe(1);
+    const c1 = out.cases.find((c) => c.sourceCaseId === "c1");
+    expect(c1?.veredictos).toEqual(["verde", "verde"]);
+    expect(c1?.failedPasses).toBe(1);
+    expect(c1?.insufficient).toBe(false);
+  });
+
+  it("un caso con una sola pasada válida es inobservable, no estable", () => {
     const out = computeDisagreement([
       j("c1", 1, "verde"),
       j("c1", 2, null, "judge_failed"),
     ]);
+    expect(out.unstableCases).toBe(0);
+    expect(out.insufficientCases).toBe(1);
+    expect(out.evaluableCases).toBe(0);
+    // Sin casos evaluables el piso es 0, no NaN.
+    expect(out.noiseFloor).toBe(0);
+    expect(out.cases[0]?.insufficient).toBe(true);
+  });
+
+  it("el denominador del piso excluye los casos inobservables", () => {
+    const out = computeDisagreement([
+      j("c1", 1, "verde"),
+      j("c1", 2, "amarillo"),
+      j("c2", 1, "verde"),
+      j("c2", 2, null, "judge_failed"),
+    ]);
+    expect(out.totalCases).toBe(2);
+    expect(out.evaluableCases).toBe(1);
+    expect(out.insufficientCases).toBe(1);
     expect(out.unstableCases).toBe(1);
+    expect(out.noiseFloor).toBe(1);
   });
 
   it("ordena los veredictos por pasada, sin importar el orden de entrada", () => {

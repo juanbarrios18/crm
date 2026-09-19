@@ -119,22 +119,50 @@ export type JudgmentLike = {
   veredicto: string | null;
 };
 
+/**
+ * Pasadas VÁLIDAS mínimas para poder juzgar la estabilidad de un caso. Con un
+ * solo veredicto no hay nada que comparar: el caso es inobservable, no estable.
+ */
+export const MIN_VALID_PASSES = 2;
+
 export type CaseDisagreement = {
   sourceCaseId: string;
-  /** Veredictos observados, en orden de pasada (incluye `null` como "sin veredicto"). */
-  veredictos: (string | null)[];
-  /** Más de un veredicto distinto entre pasadas del MISMO material. */
+  /**
+   * Veredictos VÁLIDOS observados, en orden de pasada. Excluye las pasadas que el
+   * juez no resolvió: un fallo del instrumento no es un veredicto.
+   */
+  veredictos: string[];
+  /** Más de un veredicto distinto entre pasadas válidas del MISMO material. */
   unstable: boolean;
+  /** Pasadas que el juez no resolvió para este caso (timeout, salida inválida). */
+  failedPasses: number;
+  /**
+   * El caso quedó con menos de `MIN_VALID_PASSES` veredictos: no alcanza para
+   * afirmar estabilidad ni inestabilidad. Se excluye del piso en lugar de
+   * contarse como estable, que es lo que hacía antes.
+   */
+  insufficient: boolean;
 };
 
 export type Disagreement = {
   cases: CaseDisagreement[];
+  /** Casos observados, incluidos los que no se pudieron evaluar. */
   totalCases: number;
+  /** Casos con al menos `MIN_VALID_PASSES` veredictos: los únicos evaluables. */
+  evaluableCases: number;
   unstableCases: number;
+  /** Casos con menos de `MIN_VALID_PASSES` veredictos. */
+  insufficientCases: number;
+  /** Pasadas sin veredicto sobre todo el material. */
+  failedPasses: number;
   /**
-   * Piso de ruido: proporción 0..1 de casos que cambian de veredicto entre
-   * pasadas del mismo material. Es la referencia contra la que se decide si una
-   * diferencia de score es señal o variación del juez.
+   * Piso de ruido: proporción 0..1 de casos EVALUABLES que cambian de veredicto
+   * entre pasadas del mismo material. Es la referencia contra la que se decide si
+   * una diferencia de score es señal o variación del juez.
+   *
+   * Las pasadas fallidas NO cuentan como desacuerdo: su tasa se mide aparte con
+   * `computeJudgeFailureRate` y mezclarlas hacía que un timeout se leyera como
+   * variabilidad del juez. El denominador son los casos evaluables, no todos.
    */
   noiseFloor: number;
 };
@@ -150,29 +178,43 @@ export type Disagreement = {
 export function computeDisagreement(
   judgments: JudgmentLike[]
 ): Disagreement {
-  const byCase = new Map<string, (string | null)[]>();
+  const byCase = new Map<string, { veredictos: string[]; failedPasses: number }>();
   for (const judgment of [...judgments].sort((a, b) => a.pass - b.pass)) {
-    const acc = byCase.get(judgment.sourceCaseId) ?? [];
-    acc.push(
-      judgment.status === "done" ? judgment.veredicto : null
-    );
-    byCase.set(judgment.sourceCaseId, acc);
+    const entry = byCase.get(judgment.sourceCaseId) ?? {
+      veredictos: [],
+      failedPasses: 0,
+    };
+    if (judgment.status === "done" && judgment.veredicto !== null) {
+      entry.veredictos.push(judgment.veredicto);
+    } else {
+      entry.failedPasses += 1;
+    }
+    byCase.set(judgment.sourceCaseId, entry);
   }
 
   const cases: CaseDisagreement[] = [...byCase.entries()].map(
-    ([sourceCaseId, veredictos]) => ({
+    ([sourceCaseId, entry]) => ({
       sourceCaseId,
-      veredictos,
-      unstable: new Set(veredictos).size > 1,
+      veredictos: entry.veredictos,
+      unstable: new Set(entry.veredictos).size > 1,
+      failedPasses: entry.failedPasses,
+      insufficient: entry.veredictos.length < MIN_VALID_PASSES,
     })
   );
-  const unstableCases = cases.filter((c) => c.unstable).length;
+
+  const evaluable = cases.filter((c) => !c.insufficient);
+  const unstableCases = evaluable.filter((c) => c.unstable).length;
   const totalCases = cases.length;
+  const insufficientCases = totalCases - evaluable.length;
+  const failedPasses = cases.reduce((acc, c) => acc + c.failedPasses, 0);
 
   return {
     cases,
     totalCases,
+    evaluableCases: evaluable.length,
     unstableCases,
-    noiseFloor: totalCases > 0 ? unstableCases / totalCases : 0,
+    insufficientCases,
+    failedPasses,
+    noiseFloor: evaluable.length > 0 ? unstableCases / evaluable.length : 0,
   };
 }

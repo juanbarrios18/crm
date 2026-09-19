@@ -9,7 +9,8 @@ import {
   persistSnapshot,
   toSnapshot,
 } from "@/server/lab/snapshot";
-import { computeScore, judgeCase } from "@/server/lab/judge";
+import { computeScore, judgeCase, puntosDeVeredicto, type JudgeOutcome } from "@/server/lab/judge";
+import { getEnv } from "@/lib/env";
 import { PERSONAS, type Persona } from "@/server/lab/personas";
 import { applyPipelineCheck } from "@/server/lab/pipeline-check";
 import { applyDialectCheck } from "@/server/lab/dialect-check";
@@ -172,11 +173,14 @@ async function runAllCases(
       persona: schema.agentTestCase.persona,
       status: schema.agentTestCase.status,
       veredicto: schema.agentTestCase.veredicto,
+      puntos: schema.agentTestCase.puntos,
     })
     .from(schema.agentTestCase)
     .where(eq(schema.agentTestCase.runId, runId));
-  // Mediana por persona (FR-033): cada persona aporta UN valor aunque tenga N
-  // repeticiones, así que el score no queda dominado por la persona más inestable.
+  // Media por persona (FR-033): cada persona aporta UN valor aunque tenga N
+  // repeticiones, así que el score no queda dominado por la persona más
+  // inestable. `puntos` es la media de las pasadas del juez sobre el mismo
+  // transcript; sin ese campo (corridas viejas) el score cae al veredicto.
   const score = computeScore(finalCases);
 
   await getDb()
@@ -227,35 +231,61 @@ async function runOneCase(
     advanced,
   } = await runConversation(organizationId, persona, testCase.repeatIndex);
 
-  const outcome = await judgeCase({
-    personaKey: persona.key,
-    personaLabel: persona.label,
-    personaDescription: persona.description,
-    transcript,
-    kbText: ground.kbText,
-    behaviorText: ground.behaviorText,
-    catalogText: ground.catalogText,
-    zonesText: ground.zonesText,
-  });
+  // Pasadas del juez sobre el MISMO transcript (ver `computeScore`). Una sola
+  // pasada cuantiza el caso a 0 / 0.5 / 1, y un escalón de una persona mueve el
+  // score 100/13 ≈ 7.7 puntos; la media de N pasadas baja esa amplitud a ~2.
+  // Las pasadas son independientes, así que corren en paralelo: la latencia del
+  // caso es la de una sola.
+  const judgePasses = getEnv().LAB_JUDGE_PASSES;
+  const outcomes: JudgeOutcome[] = await Promise.all(
+    Array.from({ length: judgePasses }, () =>
+      judgeCase({
+        personaKey: persona.key,
+        personaLabel: persona.label,
+        personaDescription: persona.description,
+        transcript,
+        kbText: ground.kbText,
+        behaviorText: ground.behaviorText,
+        catalogText: ground.catalogText,
+        zonesText: ground.zonesText,
+      })
+    )
+  );
+  const juzgadas = outcomes.filter(
+    (o): o is Extract<JudgeOutcome, { status: "done" }> => o.status === "done"
+  );
 
   if (agentModel) stats.agentModel = agentModel;
-  if (outcome.status === "done") stats.judgeModel = outcome.model;
+  if (juzgadas[0]) stats.judgeModel = juzgadas[0].model;
+
+  // El veredicto del CASO es el MÁS GRAVE observado entre las pasadas: una
+  // pasada que detecta la falla no se diluye porque otra no la viera. El score,
+  // en cambio, usa la MEDIA (`puntos`), que sí conserva la gradación.
+  const RANGO = { verde: 0, amarillo: 1, rojo: 2 } as const;
+  const peor = juzgadas.reduce<(typeof juzgadas)[number] | undefined>(
+    (acc, o) => (acc === undefined || RANGO[o.veredicto] > RANGO[acc.veredicto] ? o : acc),
+    undefined
+  );
 
   // Verificación determinista del pipeline (FR-030): si la persona debía
   // avanzar de etapa y el lead no se movió, es un defecto del flujo.
   // El veredicto llega DERIVADO de los hallazgos (P10) y de acá en adelante los
   // chequeos deterministas solo pueden endurecerlo.
-  let veredicto = outcome.status === "done" ? outcome.veredicto : null;
-  let hallazgos: unknown[] | null =
-    outcome.status === "done" ? [...outcome.hallazgos] : null;
-  if (outcome.status === "done") {
+  let veredicto: string | null = peor ? peor.veredicto : null;
+  let hallazgos: unknown[] | null = peor ? [...peor.hallazgos] : null;
+  let puntos: number | null = peor
+    ? juzgadas.reduce((acc, o) => acc + (puntosDeVeredicto(o.veredicto) ?? 0), 0) /
+      juzgadas.length
+    : null;
+
+  if (peor) {
     const checked = applyPipelineCheck({
       expectAdvance: persona.expectAdvance ?? false,
       advanced,
       initialStage,
       finalStage,
-      veredicto: outcome.veredicto,
-      hallazgos: outcome.hallazgos,
+      veredicto: peor.veredicto,
+      hallazgos: peor.hallazgos,
     });
     // Segundo, el dialecto: si el agente usó voseo rioplatense, endurece
     // cualquier veredicto previo a rojo.
@@ -276,13 +306,21 @@ async function runOneCase(
     });
     veredicto = facts.veredicto;
     hallazgos = facts.hallazgos;
+    // Determinista y grave: no admite crédito parcial de las pasadas del juez.
+    if (veredicto === "rojo") puntos = 0;
   } else {
     // Diagnóstico persistido: antes el porqué del fallo del juez solo vivía en
     // un console.error. El caso sigue con `veredicto` en null y excluido de la
-    // mediana de su persona (`computeScore`), pero el reporte ya muestra el
-    // motivo del fallo.
+    // media de su persona (`computeScore`), pero el reporte ya muestra el motivo.
+    const fallo = outcomes.find((o) => o.status === "judge_failed");
     hallazgos = [
-      { tipo: "judge_failed", evidencia: clipDetail(outcome.detail) },
+      {
+        tipo: "judge_failed",
+        evidencia:
+          fallo && fallo.status === "judge_failed"
+            ? clipDetail(fallo.detail)
+            : "sin detalle",
+      },
     ];
   }
 
@@ -291,13 +329,14 @@ async function runOneCase(
     .set({
       conversationId,
       transcript,
-      status: outcome.status,
-      veredicto,
+      status: peor ? "done" : "judge_failed",
+      veredicto: veredicto as "verde" | "amarillo" | "rojo" | null,
+      puntos,
       hallazgos,
       latencyMs,
       turnCount,
       turnMetrics,
-      judgeLatencyMs: outcome.status === "done" ? outcome.latencyMs : null,
+      judgeLatencyMs: peor ? peor.latencyMs : null,
       initialStage,
       finalStage,
       expectAdvance: persona.expectAdvance ?? false,

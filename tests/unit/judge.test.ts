@@ -342,17 +342,17 @@ describe("buildJudgePrompt (ground truth del juez)", () => {
   });
 });
 
-describe("computeScore (FR-033: mediana por persona)", () => {
+describe("computeScore (FR-033: media por persona)", () => {
   it("compatibilidad: una repetición por persona conserva el score anterior", () => {
     const score = computeScore([
       { persona: "p1", status: "done", veredicto: "verde" },
       { persona: "p2", status: "done", veredicto: "amarillo" },
       { persona: "p3", status: "done", veredicto: "rojo" },
     ]);
-    expect(score).toBe(50); // medianas 1, 0.5, 0 → promedio 0.5
+    expect(score).toBe(50); // medias 1, 0.5, 0 → promedio 0.5
   });
 
-  it("mediana por persona: verde + rojo → 0.5", () => {
+  it("media por persona: verde + rojo → 0.5", () => {
     const score = computeScore([
       { persona: "p1", status: "done", veredicto: "verde" },
       { persona: "p1", status: "done", veredicto: "rojo" },
@@ -360,16 +360,18 @@ describe("computeScore (FR-033: mediana por persona)", () => {
     expect(score).toBe(50);
   });
 
-  it("la mediana neutraliza una repetición atípica de la misma persona", () => {
+  it("la media CONSERVA la gradación que la mediana descartaba", () => {
+    // Con mediana esto daba 100: la repetición roja desaparecía y una persona
+    // pasaba de 0.67 a 1.00, un escalón que vale 7,7 puntos de score.
     const score = computeScore([
       { persona: "p1", status: "done", veredicto: "verde" },
       { persona: "p1", status: "done", veredicto: "verde" },
       { persona: "p1", status: "done", veredicto: "rojo" },
     ]);
-    expect(score).toBe(100); // mediana = verde, no 2/3
+    expect(score).toBe(67);
   });
 
-  it("promedia las medianas de varias personas", () => {
+  it("promedia las medias de varias personas", () => {
     const score = computeScore([
       { persona: "p1", status: "done", veredicto: "verde" },
       { persona: "p1", status: "done", veredicto: "verde" },
@@ -378,10 +380,32 @@ describe("computeScore (FR-033: mediana por persona)", () => {
       { persona: "p2", status: "done", veredicto: "rojo" },
       { persona: "p2", status: "done", veredicto: "rojo" },
     ]);
-    expect(score).toBe(50); // medianas 1 y 0
+    expect(score).toBe(67); // medias 1 y 1/3 → 2/3
   });
 
-  it("judge_failed queda fuera de la mediana de su persona", () => {
+  it("usa `puntos` (media de las pasadas del juez) cuando está presente", () => {
+    // Dos pasadas del MISMO caso, una verde y una roja → el caso vale 0.5.
+    const score = computeScore([
+      { persona: "p1", status: "done", veredicto: "rojo", puntos: 0.5 },
+    ]);
+    expect(score).toBe(50);
+  });
+
+  it("`puntos` manda sobre el veredicto", () => {
+    const score = computeScore([
+      { persona: "p1", status: "done", veredicto: "rojo", puntos: 1 },
+    ]);
+    expect(score).toBe(100);
+  });
+
+  it("sin `puntos` cae al veredicto (corridas anteriores al campo)", () => {
+    const score = computeScore([
+      { persona: "p1", status: "done", veredicto: "amarillo", puntos: null },
+    ]);
+    expect(score).toBe(50);
+  });
+
+  it("judge_failed queda fuera de la media de su persona", () => {
     const score = computeScore([
       { persona: "p1", status: "done", veredicto: "verde" },
       { persona: "p1", status: "judge_failed", veredicto: null },
