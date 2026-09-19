@@ -14,6 +14,10 @@ import {
   type LeadExtractionType,
 } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
+import {
+  declaresPurchaseIntent,
+  resolvePurchaseIntentTarget,
+} from "@/server/ai/purchase-intent";
 import { declaresNaturalPerson } from "@/server/ai/commercial-rules";
 import { isBotOutbound, toConversationHistory } from "@/server/ai/history";
 import {
@@ -523,6 +527,10 @@ export async function runAgentTurn(
   // cerrarlas para que el Laboratorio mida el `finalStage` completo
   // (runner.ts:396) y la telemetría incluya las dos llamadas.
   const extraction = await settleAnnotation(annotationPromise);
+  // Marca si la anotación movió el lead en ESTE turno. `currentStage` es una
+  // foto previa al avance, así que la red determinista de abajo necesita este
+  // indicador para no pisar al modelo ni re-evaluar una etapa ya superada.
+  let annotationAdvanced = false;
   if (!extraction.ok) {
     console.warn(
       `[agente] extracción del lead falló, el turno continúa: ${extraction.detail}`
@@ -559,12 +567,39 @@ export async function runAgentTurn(
             type: "conversation.updated",
             data: { conversation: { id: conversationId } },
           });
+          annotationAdvanced = true;
         }
       }
     }
 
     // Nota y campos comerciales: si la extracción no trae nada, no se escribe.
     await appendLeadNote(organizationId, conversation.contactId, extraction.data);
+  }
+
+  // ── Red determinista de intención de compra (P3, 008) ─────────────────────
+  // La anotación es la vía principal, pero depende del modelo. En las dos
+  // anomalías medidas (`pide_boleta_pago#1`, `reclama_no_recibido#2`) el cliente
+  // abrió con "quiero hacer un pedido para mi negocio" —señal que el criterio de
+  // "Interesado" debería reconocer— y la anotación no la promovió antes de que
+  // el handoff cortara el guion, dejando el lead en "Nuevo". Acá se evalúa el
+  // último entrante con un patrón de alta precisión, en el mismo turno.
+  //
+  // Guardas: solo desde la etapa inicial abierta (no salta etapas ni compite con
+  // un avance del modelo ya hecho) y nunca sobre un lead ganado o perdido. Si la
+  // anotación ya movió el lead, esta red no actúa.
+  if (!annotationAdvanced && lastInbound.text) {
+    const target = resolvePurchaseIntentTarget({
+      declaresIntent: declaresPurchaseIntent(lastInbound.text),
+      currentStage,
+      openStages: stages.filter((s) => s.kind === "open"),
+    });
+    if (target) {
+      await moveLeadToStage(organizationId, conversation.contactId, target.id);
+      publish(organizationId, {
+        type: "conversation.updated",
+        data: { conversation: { id: conversationId } },
+      });
+    }
   }
 
   // Latencia del turno: tiempo de pared del tramo paralelo (P1). Si la
