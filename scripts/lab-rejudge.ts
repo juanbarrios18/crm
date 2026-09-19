@@ -189,9 +189,16 @@ try {
   const floor = computeDisagreement(judgments);
   console.log("\n── Piso de ruido (mismo material, solo cambia el juez) ──");
   console.log(
-    `casos inestables: ${floor.unstableCases}/${floor.totalCases} → ` +
+    `casos evaluables: ${floor.evaluableCases}/${floor.totalCases} · ` +
+      `inestables: ${floor.unstableCases} → ` +
       `piso ${(floor.noiseFloor * 100).toFixed(1)}%`
   );
+  if (floor.failedPasses > 0 || floor.insufficientCases > 0) {
+    console.log(
+      `pasadas sin veredicto: ${floor.failedPasses} · casos no evaluables: ` +
+        `${floor.insufficientCases} (se miden aparte: no son ruido del juez)`
+    );
+  }
   for (const c of floor.cases.filter((c) => c.unstable)) {
     console.log(`  ${c.sourceCaseId}: ${c.veredictos.join(" / ")}`);
   }
