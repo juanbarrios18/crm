@@ -211,6 +211,18 @@ describe("F4 — poda del system prompt (perfil Lamas Foods)", () => {
     expect(prompt).toContain("FUENTES DE VERDAD");
   });
 
+  it("no lista varios formatos con precio a la vez (sin la viñeta huérfana de opciones)", () => {
+    // La viñeta "si cotiza más de una opción, líneas separadas con guion"
+    // contradecía la política de cotizar solo la opción elegida.
+    expect(prompt).toContain("nunca varios formatos con precio a la vez");
+    expect(prompt).not.toContain("líneas separadas con guion");
+  });
+
+  it("la calificación pide una pregunta por mensaje", () => {
+    expect(prompt).toContain("con una pregunta por mensaje");
+    expect(prompt).not.toContain("de a una o dos preguntas");
+  });
+
   it("el catálogo va agrupado por producto y masa, con los números exactos", () => {
     expect(prompt).toContain("Pan de hamburguesa — masa Brioche:");
     expect(prompt).toContain("- 12 cm · bolsa de 6 · $2.220 neto · $2.641,80 con IVA");

@@ -722,6 +722,191 @@ async function main() {
       contact005.margen === undefined
   );
 
+  console.log("\n== 013: remediacion ejf1 — handoff determinista y precision ==");
+
+  /*
+   * Redes deterministas de 008 (plan sección 7). Corren en el pipeline ANTES
+   * del modelo, así que su efecto es observable contra la app real sin que el
+   * ai-mock sepa nada: si el último entrante matchea el patrón de escalado, el
+   * pipeline entrega el cierre cordial y aplica handoff con motivo "cliente".
+   *
+   * Cada escenario usa un teléfono sintético propio (canónico 52462900130x)
+   * para no colisionar con contactos ni conversaciones previas, y waMessageId
+   * únicos. Los casos replican los defectos medidos en la corrida
+   * run_ejf1ffwxlmifjeeh315f (tests/fixtures/lab/remediacion-ejf1-cases.json).
+   */
+  const findConv013 = async (canonicalPhone) =>
+    (((await api("/api/conversations")).json?.conversations) ?? []).find(
+      (c) => c.contact.phone === canonicalPhone
+    );
+
+  // Persona natural — consulta de historial: el canal no puede gestionarla y la
+  // configuración manda derivar (patrón HISTORY_REQUEST).
+  await api("/api/dev/wa-mock/inbound", {
+    method: "POST",
+    body: JSON.stringify({
+      phoneNumberId: PN,
+      from: "5214629001301", // canónico: 524629001301
+      name: "Lead 013 historial",
+      text: "me puedes decir que pedidos tengo pendientes?",
+      waMessageId: "wamid.e2e.013.in.historial.1",
+    }),
+  });
+  await sleep(1800); // el handoff no usa el LLM, pero el webhook se procesa aparte
+  const convHistorial = await findConv013("524629001301");
+  ok(
+    "013: conversación de historial creada",
+    Boolean(convHistorial),
+    "sin conversación"
+  );
+  ok(
+    "historial → handoff con motivo cliente",
+    Boolean(convHistorial?.handoffAt) && convHistorial?.handoffReason === "cliente",
+    JSON.stringify({
+      handoffAt: convHistorial?.handoffAt,
+      reason: convHistorial?.handoffReason,
+    })
+  );
+  const msgsHistorial = convHistorial
+    ? (await api(`/api/conversations/${convHistorial.id}/messages`)).json?.messages ?? []
+    : [];
+  ok(
+    "el cierre de escalado llega al cliente (menciona a una persona)",
+    msgsHistorial.some(
+      (m) =>
+        m.direction === "out" &&
+        typeof m.text === "string" &&
+        m.text.includes("una persona")
+    ),
+    JSON.stringify(msgsHistorial.filter((m) => m.direction === "out").map((m) => m.text))
+  );
+
+  // Descuento pedido con cantidad condicional: "si llevo 20 me hacen precio?".
+  // Es el defecto determinista comprador_decidido#0/#2.
+  await api("/api/dev/wa-mock/inbound", {
+    method: "POST",
+    body: JSON.stringify({
+      phoneNumberId: PN,
+      from: "5214629001302", // canónico: 524629001302
+      name: "Lead 013 descuento",
+      text: "y si llevo 20 me hacen precio?",
+      waMessageId: "wamid.e2e.013.in.descuento.1",
+    }),
+  });
+  await sleep(1800);
+  const convDescuento = await findConv013("524629001302");
+  ok(
+    "descuento por volumen → handoff con motivo cliente (comprador_decidido#0/#2)",
+    Boolean(convDescuento?.handoffAt) && convDescuento?.handoffReason === "cliente",
+    JSON.stringify({
+      handoffAt: convDescuento?.handoffAt,
+      reason: convDescuento?.handoffReason,
+    })
+  );
+
+  // Envío de boleta por correo: el canal no lo gestiona, exige derivar. Es el
+  // defecto determinista pide_boleta_pago#2. La continuidad exige además que el
+  // agente NO afirme haber enviado el documento.
+  await api("/api/dev/wa-mock/inbound", {
+    method: "POST",
+    body: JSON.stringify({
+      phoneNumberId: PN,
+      from: "5214629001303", // canónico: 524629001303
+      name: "Lead 013 boleta",
+      text: "y me la mandan al correo?",
+      waMessageId: "wamid.e2e.013.in.boleta.1",
+    }),
+  });
+  await sleep(1800);
+  const convBoleta = await findConv013("524629001303");
+  ok(
+    "envío de boleta por correo → handoff con motivo cliente (pide_boleta_pago#2)",
+    Boolean(convBoleta?.handoffAt) && convBoleta?.handoffReason === "cliente",
+    JSON.stringify({
+      handoffAt: convBoleta?.handoffAt,
+      reason: convBoleta?.handoffReason,
+    })
+  );
+  const msgsBoleta = convBoleta
+    ? (await api(`/api/conversations/${convBoleta.id}/messages`)).json?.messages ?? []
+    : [];
+  const outBoleta = msgsBoleta.filter((m) => m.direction === "out");
+  ok(
+    "continuidad: el agente no afirma haber enviado la boleta",
+    outBoleta.length > 0 &&
+      outBoleta.every(
+        (m) => !/ya se la envi|se la envié|ya la enviamos/i.test(m.text ?? "")
+      ),
+    JSON.stringify(outBoleta.map((m) => m.text))
+  );
+
+  // Intención de compra explícita: la red determinista AVANZA el lead, no lo
+  // deriva. El mensaje no debe disparar handoff y el agente sí debe responder.
+  await api("/api/dev/wa-mock/inbound", {
+    method: "POST",
+    body: JSON.stringify({
+      phoneNumberId: PN,
+      from: "5214629001304", // canónico: 524629001304
+      name: "Lead 013 compra",
+      text: "hola, quiero hacer un pedido para mi negocio",
+      waMessageId: "wamid.e2e.013.in.compra.1",
+    }),
+  });
+  await sleep(2500); // turno del agente (ai-mock)
+  const convCompra = await findConv013("524629001304");
+  ok(
+    "013: conversación de intención de compra creada",
+    Boolean(convCompra),
+    "sin conversación"
+  );
+  ok(
+    "la intención de compra no escala por sí sola",
+    Boolean(convCompra) && !convCompra?.handoffAt,
+    JSON.stringify({
+      handoffAt: convCompra?.handoffAt,
+      reason: convCompra?.handoffReason,
+    })
+  );
+  const msgsCompra = convCompra
+    ? (await api(`/api/conversations/${convCompra.id}/messages`)).json?.messages ?? []
+    : [];
+  ok(
+    "el agente respondió el pedido sin escalar",
+    msgsCompra.some((m) => m.direction === "out" && m.origin === "ai"),
+    JSON.stringify(msgsCompra.at(-1))
+  );
+
+  // Control de precisión: una consulta de precio simple NO debe cortar la venta
+  // en curso (falso positivo del patrón de escalado).
+  await api("/api/dev/wa-mock/inbound", {
+    method: "POST",
+    body: JSON.stringify({
+      phoneNumberId: PN,
+      from: "5214629001305", // canónico: 524629001305
+      name: "Lead 013 precio",
+      text: "cuanto sale la bolsa de brioche de 12?",
+      waMessageId: "wamid.e2e.013.in.precio.1",
+    }),
+  });
+  await sleep(2500);
+  const convPrecio = await findConv013("524629001305");
+  ok(
+    "consulta de precio simple → sin handoff (la venta sigue viva)",
+    Boolean(convPrecio) && !convPrecio?.handoffAt,
+    JSON.stringify({
+      handoffAt: convPrecio?.handoffAt,
+      reason: convPrecio?.handoffReason,
+    })
+  );
+  const msgsPrecio = convPrecio
+    ? (await api(`/api/conversations/${convPrecio.id}/messages`)).json?.messages ?? []
+    : [];
+  ok(
+    "el agente cotizó sin escalar",
+    msgsPrecio.some((m) => m.direction === "out" && m.origin === "ai"),
+    JSON.stringify(msgsPrecio.at(-1))
+  );
+
   console.log("\n== 006: push endpoints (config/subscribe/unsubscribe) ==");
   const pushCfg = await api("/api/push/config");
   ok(

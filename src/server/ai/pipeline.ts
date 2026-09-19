@@ -14,6 +14,11 @@ import {
   type LeadExtractionType,
 } from "@/server/ai/actions";
 import { matchesHandoffIntent } from "@/server/ai/handoff";
+import {
+  declaresPurchaseIntent,
+  resolvePurchaseIntentTarget,
+} from "@/server/ai/purchase-intent";
+import { declaresNaturalPerson } from "@/server/ai/commercial-rules";
 import { isBotOutbound, toConversationHistory } from "@/server/ai/history";
 import {
   ANNOTATION_HISTORY_LIMIT,
@@ -284,6 +289,20 @@ export async function runAgentTurn(
     .limit(1);
   const clientFile = contactRows[0] ?? null;
 
+  // P1a — elegibilidad de despacho: persona natural SOLO retiro. Se decide con
+  // hechos DECLARADOS: el cliente lo dijo en el hilo y la ficha no tiene datos
+  // de empresa. La ausencia de datos de empresa, por sí sola, NO convierte a
+  // nadie en persona natural.
+  const inboundTexts = history
+    .filter((m) => m.direction === "in")
+    .map((m) => m.text)
+    .filter((t): t is string => typeof t === "string");
+  const declaredNaturalPerson = inboundTexts.some(declaresNaturalPerson);
+  const knownBusiness = Boolean(
+    clientFile?.empresa || clientFile?.razonSocial || clientFile?.giro
+  );
+  const clientIsNaturalPerson = declaredNaturalPerson && !knownBusiness;
+
   // 005 — contexto comercial: catálogo público + zonas de envío (NUNCA el costo).
   const catalog = await getActiveProductsPublic(organizationId);
   const zones = await getActiveZones(organizationId);
@@ -445,9 +464,20 @@ export async function runAgentTurn(
       const sources = { catalog, zones };
       // F5b: cuántas veces habló ya el agente en el hilo, para detectar el
       // saludo repetido. Se cuenta sobre el mismo historial de la llamada.
+      // P2: además, los textos de esos salientes del bot (el turno actual aún
+      // no está persistido) alimentan la detección de respuesta repetida.
+      const previousAgentReplies = history.flatMap((m) =>
+        isBotOutbound(m) && m.text ? [m.text] : []
+      );
       const guardContext = {
         greeting: profile.greeting,
         agentTurnsBefore: history.filter((m) => isBotOutbound(m)).length,
+        previousAgentReplies,
+        clientIsNaturalPerson,
+        businessText: profile.instructions ?? null,
+        // T001: el nombre de la ficha permite vetar sus menciones posteriores a
+        // la primera. Sin ficha, el guard del nombre no evalúa nada.
+        contactName: clientFile?.name ?? null,
       };
       const first = guardReply(reply, sources, guardContext);
       if (!first.ok) {
@@ -476,8 +506,9 @@ export async function runAgentTurn(
             else guardViolations += second.violations.length;
           }
         }
-        // Con solo violaciones de estilo se conserva la original.
-        reply = corrected ?? resolveUncorrectedReply(reply, first.violations);
+        // Con solo violaciones de estilo se conserva la original; el nombre
+        // repetido se entrega sin el nombre (T001).
+        reply = corrected ?? resolveUncorrectedReply(reply, first.violations, guardContext);
       }
     } catch (err) {
       console.error("[guard] error inesperado, se entrega el reply original:", err);
@@ -500,6 +531,10 @@ export async function runAgentTurn(
   // cerrarlas para que el Laboratorio mida el `finalStage` completo
   // (runner.ts:396) y la telemetría incluya las dos llamadas.
   const extraction = await settleAnnotation(annotationPromise);
+  // Marca si la anotación movió el lead en ESTE turno. `currentStage` es una
+  // foto previa al avance, así que la red determinista de abajo necesita este
+  // indicador para no pisar al modelo ni re-evaluar una etapa ya superada.
+  let annotationAdvanced = false;
   if (!extraction.ok) {
     console.warn(
       `[agente] extracción del lead falló, el turno continúa: ${extraction.detail}`
@@ -536,12 +571,39 @@ export async function runAgentTurn(
             type: "conversation.updated",
             data: { conversation: { id: conversationId } },
           });
+          annotationAdvanced = true;
         }
       }
     }
 
     // Nota y campos comerciales: si la extracción no trae nada, no se escribe.
     await appendLeadNote(organizationId, conversation.contactId, extraction.data);
+  }
+
+  // ── Red determinista de intención de compra (P3, 008) ─────────────────────
+  // La anotación es la vía principal, pero depende del modelo. En las dos
+  // anomalías medidas (`pide_boleta_pago#1`, `reclama_no_recibido#2`) el cliente
+  // abrió con "quiero hacer un pedido para mi negocio" —señal que el criterio de
+  // "Interesado" debería reconocer— y la anotación no la promovió antes de que
+  // el handoff cortara el guion, dejando el lead en "Nuevo". Acá se evalúa el
+  // último entrante con un patrón de alta precisión, en el mismo turno.
+  //
+  // Guardas: solo desde la etapa inicial abierta (no salta etapas ni compite con
+  // un avance del modelo ya hecho) y nunca sobre un lead ganado o perdido. Si la
+  // anotación ya movió el lead, esta red no actúa.
+  if (!annotationAdvanced && lastInbound.text) {
+    const target = resolvePurchaseIntentTarget({
+      declaresIntent: declaresPurchaseIntent(lastInbound.text),
+      currentStage,
+      openStages: stages.filter((s) => s.kind === "open"),
+    });
+    if (target) {
+      await moveLeadToStage(organizationId, conversation.contactId, target.id);
+      publish(organizationId, {
+        type: "conversation.updated",
+        data: { conversation: { id: conversationId } },
+      });
+    }
   }
 
   // Latencia del turno: tiempo de pared del tramo paralelo (P1). Si la

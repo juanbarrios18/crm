@@ -1,5 +1,15 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { guardReply, resolveUncorrectedReply, SAFE_FALLBACK_REPLY } from "@/server/ai/reply-guard";
+import {
+  guardReply,
+  isRepeatedName,
+  isRepeatedReply,
+  resolveUncorrectedReply,
+  stripContactName,
+  SAFE_FALLBACK_REPLY,
+  type GuardContext,
+} from "@/server/ai/reply-guard";
 import type { PublicProduct } from "@/lib/catalog";
 
 /**
@@ -162,26 +172,350 @@ describe("guardReply — no veta cualquier 'Hola' (PROD run_pk41)", () => {
   });
 });
 
+describe("guardReply — respuesta repetida (P2)", () => {
+  // Texto literal del defecto de continuidad en pide_boleta_pago#0: el agente
+  // repite casi palabra por palabra su pregunta anterior tras "transfiero hoy
+  // mismo".
+  const REPEATED =
+    "Por supuesto. Para coordinar, ¿me podría indicar la comuna de su negocio y los productos que necesita? Así le puedo confirmar el detalle y los datos para la transferencia.";
+
+  const context = (previousAgentReplies: readonly string[]): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: previousAgentReplies.length,
+    previousAgentReplies,
+  });
+
+  it("marca la repetición literal de una respuesta previa", () => {
+    expect(isRepeatedReply(REPEATED, context([REPEATED]))).toBe(true);
+    const out = guardReply(REPEATED, sources, context([REPEATED]));
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("respuesta_repetida");
+    expect(out.correction).toContain("repite");
+  });
+
+  it("marca una variante con altísimo solapamiento de palabras", () => {
+    const variant =
+      "Por supuesto. ¿Me podría indicar la comuna de su negocio y los productos que necesita? Así le puedo confirmar el detalle y los datos para la transferencia.";
+    expect(isRepeatedReply(variant, context([REPEATED]))).toBe(true);
+  });
+
+  it("no marca una respuesta nueva y distinta", () => {
+    const other =
+      "Perfecto. Una vez recibido el pago, su pedido entra a producción y las 48 horas comienzan a correr desde ese momento.";
+    expect(isRepeatedReply(other, context([REPEATED]))).toBe(false);
+    expect(guardReply(other, sources, context([REPEATED])).ok).toBe(true);
+  });
+
+  it("no marca la primera vez, sin respuestas previas", () => {
+    expect(isRepeatedReply(REPEATED, context([]))).toBe(false);
+    expect(guardReply(REPEATED, sources, context([])).ok).toBe(true);
+  });
+
+  it("no marca una línea corta de cierre repetida", () => {
+    // Menos de 8 tokens: puede repetirse sin ser un defecto de continuidad.
+    const short = "Gracias, quedo atento.";
+    expect(isRepeatedReply(short, context([short]))).toBe(false);
+  });
+});
+
+describe("guardReply — nombre repetido (T001)", () => {
+  const CONTACT = "Roberto Gonzalez";
+
+  const context = (over: Partial<GuardContext> = {}): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: 1,
+    previousAgentReplies: [],
+    contactName: CONTACT,
+    ...over,
+  });
+
+  it("marca la segunda mención del nombre (reproducción de PROD)", () => {
+    // Caso real de PROD: el nombre ya apareció en el saludo del agente y el
+    // modelo lo vuelve a usar en cada turno.
+    const firstReply =
+      "Hola, Roberto. Somos el equipo comercial de Lamas Foods, ¿qué necesita?";
+    const reply =
+      "¡Hola Roberto! Qué bueno saber de usted. En La Florida, tenemos pan de completo.";
+    const ctx = context({ previousAgentReplies: [firstReply] });
+
+    expect(isRepeatedName(reply, ctx)).toBe(true);
+    const out = guardReply(reply, sources, ctx);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("nombre_repetido");
+    expect(out.correction).toContain("nombre");
+  });
+
+  it("marca la mención posterior con el nombre al inicio y contenido detrás", () => {
+    const ctx = context({ previousAgentReplies: ["Hola, Roberto."] });
+    const reply = "Roberto, el pedido mínimo para despacho es de 15 bolsas";
+    expect(isRepeatedName(reply, ctx)).toBe(true);
+  });
+
+  it("no veta la PRIMERA mención del nombre (sin salientes previos)", () => {
+    const reply = "Hola, Roberto, ¿en qué le puedo ayudar?";
+    expect(isRepeatedName(reply, context({ previousAgentReplies: [] }))).toBe(false);
+    expect(guardReply(reply, sources, context({ previousAgentReplies: [] })).ok).toBe(true);
+  });
+
+  it("sin nombre en la ficha no evalúa nada", () => {
+    const ctx = context({ contactName: null, previousAgentReplies: ["Hola, Roberto."] });
+    expect(isRepeatedName("Hola, Roberto.", ctx)).toBe(false);
+  });
+
+  it("no evalúa nombres de un solo token de menos de 4 letras", () => {
+    const ctx = context({ contactName: "Ana", previousAgentReplies: ["Hola, Ana."] });
+    expect(isRepeatedName("Hola, Ana.", ctx)).toBe(false);
+  });
+
+  it("no marca cuando el token aparece como parte de otra palabra (comparación por token)", () => {
+    const ctx = context({ contactName: "Rosa", previousAgentReplies: ["Gracias, Rosa."] });
+    expect(isRepeatedName("El pan rosado no aplica.", ctx)).toBe(false);
+  });
+
+  it("no marca 'rosa' en 'rosa mosqueta': es token completo, pero no vocativo (T005)", () => {
+    // El comentario anterior afirmaba que "rosa" no disparaba por ser parte de
+    // otra palabra; "rosa mosqueta" es un token completo. Lo que lo excluye es
+    // el artículo que lo precede, no la segmentación.
+    const ctx = context({ contactName: "Rosa Diaz", previousAgentReplies: ["Gracias, Rosa."] });
+    expect(isRepeatedName("La rosa mosqueta cuesta $3.000.", ctx)).toBe(false);
+  });
+
+  it("stripContactName elimina el nombre y conserva el contenido", () => {
+    expect(
+      stripContactName("Roberto, el pedido mínimo para despacho es de 15 bolsas", CONTACT)
+    ).toBe("El pedido mínimo para despacho es de 15 bolsas");
+  });
+
+  it("stripContactName limpia la puntuación huérfana", () => {
+    expect(
+      stripContactName(
+        "Sí, Roberto. Hacemos despachos en La Florida con un costo de $5.000.",
+        CONTACT
+      )
+    ).toBe("Sí. Hacemos despachos en La Florida con un costo de $5.000.");
+  });
+
+  it("stripContactName devuelve el fallback si el mensaje era solo el nombre", () => {
+    expect(stripContactName("Roberto Gonzalez", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+    expect(stripContactName("Roberto.", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+  });
+
+  it("sin nombre no toca la respuesta", () => {
+    expect(stripContactName("El despacho cuesta $5.000.", null)).toBe(
+      "El despacho cuesta $5.000."
+    );
+  });
+
+  it("resolveUncorrectedReply conserva el contenido sin el nombre, no el fallback", () => {
+    const original = "Roberto, el pedido mínimo para despacho es de 15 bolsas";
+    expect(
+      resolveUncorrectedReply(
+        original,
+        [{ kind: "nombre_repetido", detail: original }],
+        context()
+      )
+    ).toBe("El pedido mínimo para despacho es de 15 bolsas");
+  });
+});
+
+/**
+ * T005 — el guard mide VOCATIVO, no coincidencia de token.
+ *
+ * La verificación adversarial probó que contar cualquier aparición del token
+ * corrompía mensajes correctos: "Santiago" es comuna del catálogo y nombre
+ * chileno, así que "El despacho a Santiago cuesta $5.000." se vetaba y se
+ * entregaba como "El despacho a cuesta $5.000.".
+ */
+describe("guardReply — nombre repetido: vocativo vs coincidencia léxica (T005)", () => {
+  const context = (over: Partial<GuardContext> = {}): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: 1,
+    previousAgentReplies: [],
+    ...over,
+  });
+
+  it("no veta la comuna Santiago aunque el saliente previo la nombre", () => {
+    const ctx = context({
+      contactName: "Santiago Perez",
+      previousAgentReplies: ["Hacemos despachos en Santiago con un costo de $5.000."],
+    });
+    const reply = "El despacho a Santiago cuesta $5.000.";
+    expect(isRepeatedName(reply, ctx)).toBe(false);
+    expect(stripContactName(reply, "Santiago Perez")).toBe(reply);
+  });
+
+  it("no veta el producto 'rosa mosqueta' con contacto 'Rosa Diaz'", () => {
+    const ctx = context({
+      contactName: "Rosa Diaz",
+      previousAgentReplies: ["Hacemos despachos en Rosa con un costo de $5.000."],
+    });
+    expect(isRepeatedName("La rosa mosqueta cuesta $3.000.", ctx)).toBe(false);
+  });
+
+  it("no veta un nombre de empresa precedido por preposición", () => {
+    const reply = "En Panaderia El Trigo, el despacho cuesta $5.000.";
+    const ctx = context({
+      contactName: "Panaderia El Trigo",
+      previousAgentReplies: [reply],
+    });
+    expect(isRepeatedName(reply, ctx)).toBe(false);
+    expect(stripContactName(reply, "Panaderia El Trigo")).toBe(reply);
+  });
+
+  it("reproduce la conversación de PROD: la 1ª mención no dispara, las siguientes sí", () => {
+    const contactName = "Roberto Gonzalez";
+    const msg2 = "Hola, Roberto. Somos el equipo comercial de Lamas Foods, ¿qué necesita?";
+    const msg4 = "¡Hola Roberto! Qué bueno saber de usted. En La Florida, tenemos pan de completo.";
+    const msg8 = "Sí, Roberto. Hacemos despachos en La Florida con un costo de $5.000.";
+    const msg10 = "Roberto, el pedido mínimo para despacho es de 15 bolsas.";
+
+    // msg2: primera mención, sin salientes previos → permitida.
+    expect(
+      isRepeatedName(msg2, context({ contactName, previousAgentReplies: [] }))
+    ).toBe(false);
+
+    // msg4/msg8/msg10: el nombre ya se usó como vocativo → vetadas.
+    expect(isRepeatedName(msg4, context({ contactName, previousAgentReplies: [msg2] }))).toBe(
+      true
+    );
+    expect(
+      isRepeatedName(msg8, context({ contactName, previousAgentReplies: [msg2, msg4] }))
+    ).toBe(true);
+    expect(
+      isRepeatedName(msg10, context({ contactName, previousAgentReplies: [msg2, msg8] }))
+    ).toBe(true);
+  });
+
+  it("no dispara si el saliente previo solo mencionó el nombre sin vocativo", () => {
+    const ctx = context({
+      contactName: "Roberto Gonzalez",
+      previousAgentReplies: ["El despacho a Roberto cuesta $5.000."],
+    });
+    expect(isRepeatedName("Roberto, el pedido mínimo es de 15 bolsas.", ctx)).toBe(false);
+  });
+
+  it("reconoce el vocativo de un nombre con tilde", () => {
+    const ctx = context({
+      contactName: "José Muñoz",
+      previousAgentReplies: ["Hola, José. Somos el equipo comercial."],
+    });
+    expect(isRepeatedName("José, el precio es $5.000.", ctx)).toBe(true);
+    expect(stripContactName("José, el precio es $5.000.", "José Muñoz")).toBe(
+      "El precio es $5.000."
+    );
+  });
+});
+
+describe("stripContactName — solo vocativos (T005)", () => {
+  const CONTACT = "Roberto Gonzalez";
+  const prior: readonly string[] = ["Hola, Roberto. Somos el equipo comercial."];
+
+  it("quita el vocativo al inicio y capitaliza", () => {
+    expect(stripContactName("Roberto, el pedido mínimo para despacho es de 15 bolsas.", CONTACT)).toBe(
+      "El pedido mínimo para despacho es de 15 bolsas."
+    );
+  });
+
+  it("consume el delimitador interior y no deja coma huérfana", () => {
+    expect(
+      stripContactName(
+        "Sí, Roberto. Hacemos despachos en La Florida con un costo de $5.000.",
+        CONTACT
+      )
+    ).toBe("Sí. Hacemos despachos en La Florida con un costo de $5.000.");
+  });
+
+  it("quita el vocativo tras la interjección de saludo", () => {
+    expect(stripContactName("¡Hola Roberto! Qué bueno saber de usted.", CONTACT)).toBe(
+      "¡Hola! Qué bueno saber de usted."
+    );
+  });
+
+  it("conserva los signos de apertura y capitaliza tras ellos", () => {
+    expect(stripContactName("¿Roberto, me confirma la comuna?", CONTACT)).toBe(
+      "¿Me confirma la comuna?"
+    );
+  });
+
+  it("consume el dos puntos posterior cuando no hay delimitador previo", () => {
+    expect(stripContactName("Roberto: el precio es $5.000.", CONTACT)).toBe(
+      "El precio es $5.000."
+    );
+  });
+
+  it("consume el punto y coma previo", () => {
+    expect(stripContactName("Gracias, Roberto; quedamos atentos.", CONTACT)).toBe(
+      "Gracias; quedamos atentos."
+    );
+  });
+
+  it("quita el nombre completo sin mayúscula rara en mitad de oración", () => {
+    expect(stripContactName("Roberto y Gonzalez, el precio es $5.000.", CONTACT)).toBe(
+      "El precio es $5.000."
+    );
+  });
+
+  it("el mensaje que era solo el nombre cae en el fallback seguro", () => {
+    expect(stripContactName("Roberto Gonzalez.", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+    expect(stripContactName("¿Roberto?", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+  });
+
+  it("sin nombre no toca la respuesta", () => {
+    expect(stripContactName("El despacho cuesta $5.000.", null)).toBe(
+      "El despacho cuesta $5.000."
+    );
+  });
+
+  it("no recorta si el primer token del nombre mide menos de 4", () => {
+    expect(stripContactName("Ana, el pedido mínimo es de 15 bolsas.", "Ana")).toBe(
+      "Ana, el pedido mínimo es de 15 bolsas."
+    );
+  });
+
+  it("el vocativo ya usado antes no se confunde con la comuna", () => {
+    const reply = "El despacho a Santiago cuesta $5.000.";
+    expect(prior.length).toBeGreaterThan(0);
+    expect(stripContactName(reply, "Santiago Perez")).toBe(reply);
+  });
+});
+
 describe("resolveUncorrectedReply", () => {
+  const ctx: GuardContext = { greeting: null, agentTurnsBefore: 1 };
+
   it("conserva la original si la única violación era el saludo repetido", () => {
     const original = "¡Hola! Su volumen semanal es alto, un ejecutivo lo contactará.";
     expect(
-      resolveUncorrectedReply(original, [{ kind: "saludo_repetido", detail: original }])
+      resolveUncorrectedReply(original, [{ kind: "saludo_repetido", detail: original }], ctx)
+    ).toBe(original);
+  });
+
+  it("conserva la original si la única violación era la respuesta repetida", () => {
+    // Es una falla de estilo: la original al menos es informativa y el fallback
+    // genérico perdería la respuesta. Se conserva, igual que el saludo repetido.
+    const original = "Por supuesto. ¿Me indica la comuna de su negocio y los productos?";
+    expect(
+      resolveUncorrectedReply(original, [{ kind: "respuesta_repetida", detail: original }], ctx)
     ).toBe(original);
   });
 
   it("entrega la respuesta segura si había una violación de hechos", () => {
     expect(
-      resolveUncorrectedReply("Sale $9.999 neto.", [{ kind: "precio", detail: "$9.999" }])
+      resolveUncorrectedReply("Sale $9.999 neto.", [{ kind: "precio", detail: "$9.999" }], ctx)
     ).toBe(SAFE_FALLBACK_REPLY);
   });
 
   it("entrega la respuesta segura si conviven saludo repetido y violación de hechos", () => {
     expect(
-      resolveUncorrectedReply("¡Hola! Sale $9.999 neto.", [
-        { kind: "saludo_repetido", detail: "¡Hola!" },
-        { kind: "precio", detail: "$9.999" },
-      ])
+      resolveUncorrectedReply(
+        "¡Hola! Sale $9.999 neto.",
+        [
+          { kind: "saludo_repetido", detail: "¡Hola!" },
+          { kind: "precio", detail: "$9.999" },
+        ],
+        ctx
+      )
     ).toBe(SAFE_FALLBACK_REPLY);
   });
 
@@ -190,5 +524,66 @@ describe("resolveUncorrectedReply", () => {
     expect(lower).not.toContain("le escribo");
     expect(lower).not.toContain("podemos ayudarle");
     expect(guardReply(SAFE_FALLBACK_REPLY, sources).ok).toBe(true);
+  });
+
+  it("entrega la respuesta segura si la violación es comercial", () => {
+    const original = "El despacho es sin costo.";
+    expect(
+      resolveUncorrectedReply(
+        original,
+        [{ kind: "despacho_gratuito", detail: "despacho sin costo" }],
+        ctx
+      )
+    ).toBe(SAFE_FALLBACK_REPLY);
+  });
+});
+
+describe("guardReply — reglas comerciales (P1)", () => {
+  const FIXTURE = path.join(process.cwd(), "tests/fixtures/lab/remediacion-ejf1-cases.json");
+  const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as {
+    cases: { key: string; transcript: { role: "cliente" | "agente"; text: string }[] }[];
+  };
+  const turnText = (key: string, needle: string): string => {
+    const c = fixture.cases.find((x) => x.key === key);
+    const turn = c?.transcript.find((t) => t.text.includes(needle));
+    if (!turn) throw new Error(`turn not found: ${key} / ${needle}`);
+    return turn.text;
+  };
+  const context = (extra: Partial<GuardContext> = {}): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: 1,
+    ...extra,
+  });
+
+  it("rechaza despacho ofrecido a una persona natural declarada", () => {
+    const reply = turnText("consumidor_final#0", "podemos despachar a domicilio");
+    const out = guardReply(reply, sources, context({ clientIsNaturalPerson: true }));
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("elegibilidad_despacho");
+  });
+
+  it("rechaza el despacho sin costo", () => {
+    const reply = turnText("comprador_decidido#0", "despacho sin costo adicional");
+    const out = guardReply(reply, sources, context());
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("despacho_gratuito");
+  });
+
+  it("rechaza un plazo inventado cuando la fuente no lo respalda", () => {
+    const reply = turnText("comprador_decidido#2", "48 horas hábiles");
+    const out = guardReply(reply, sources, context({ businessText: "producción y 48 horas" }));
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("plazo_inventado");
+  });
+
+  it("rechaza prometer una revisión de historial", () => {
+    const reply = turnText("cliente_recurrente#0", "puedo revisar su historial");
+    const out = guardReply(reply, sources, context());
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.violations.map((v) => v.kind)).toContain("capacidad_inventada");
   });
 });

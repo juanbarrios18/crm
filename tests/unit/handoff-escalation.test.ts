@@ -42,6 +42,40 @@ describe("matchesHandoffIntent (008) — queja y descuento", () => {
   });
 });
 
+describe("matchesHandoffIntent (008 P2) — precio especial, documento e historial", () => {
+  it.each([
+    "y si llevo 20 me hacen precio?",
+    "si compro 30 me dejan mejor precio?",
+    "y si pido 50, hay descuento?",
+    "por 20 me hacen precio?",
+    "me mandan la boleta al correo?",
+    "me la envian al correo?",
+    "me puedes decir que pedidos tengo pendientes?",
+    "quiero ver mi historial de compras",
+  ])("escala con: %s", (text) => {
+    expect(matchesHandoffIntent(text)).toBe(true);
+  });
+
+  it.each([
+    // Consulta de precio con número: el número suelto NO es una cantidad
+    // condicional. Un falso positivo acá cortaría una venta en curso.
+    "cuanto sale la bolsa de brioche de 12?",
+    "y el de 20?",
+    "cuanto sale la bolsa de 20 cm?",
+    // Emitir la boleta es una capacidad del negocio; solo el ENVÍO por correo
+    // exige escalado.
+    "me pueden emitir boleta?",
+    // El modelo de venta del negocio no es una queja.
+    "trabajamos la venta al por mayor",
+    // "atienda" sin verbo de contacto es ambiguo (¿atienden los sábados?).
+    "prefiero que me atienda una persona",
+    // Consulta de producto sin construcción condicional.
+    "y el pan de molde blanco XL?",
+  ])("no escala con: %s", (text) => {
+    expect(matchesHandoffIntent(text)).toBe(false);
+  });
+});
+
 describe("isRepeatedGreeting (008) — variantes cortas", () => {
   const ctx = (agentTurnsBefore: number) => ({
     greeting: "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita?",
