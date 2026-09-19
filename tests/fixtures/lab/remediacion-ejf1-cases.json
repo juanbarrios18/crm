@@ -1,0 +1,800 @@
+{
+  "schemaVersion": 1,
+  "title": "Fixtures etiquetados de la corrida run_ejf1ffwxlmifjeeh315f (auditoría humana, no re-juzgada)",
+  "source": "specs/008-medicion-contexto-agente/evidence/run_ejf1ffwxlmifjeeh315f-cases.jsonl",
+  "sourceHashes": {
+    "cases": "9330f818e5a8add94c05e83798a93d757e9fb37fe8c24a211f2b380fc59f4175",
+    "run": "7c3ae82f32d6f5ac2d8749c30b68ce9d3e2028f2b0d32398c89f6ace69f86208"
+  },
+  "note": "Las etiquetas son humanas y previas a cualquier cambio de prompt o rúbrica. No re-juzgar para elegir la etiqueta.",
+  "cases": [
+    {
+      "key": "consumidor_final#0",
+      "persona": "consumidor_final",
+      "repeatIndex": 0,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, quiero comprar pan para mi casa"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "me lo pueden despachar a domicilio?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, sí, podemos despachar a domicilio. Nuestro pedido mínimo para despacho es de 15 bolsas, que pueden ser combinadas. ¿Qué cantidad y tipo de pan necesita?"
+        },
+        {
+          "role": "cliente",
+          "text": "ah, entonces no puedo comprar?"
+        },
+        {
+          "role": "agente",
+          "text": "Nuestro pedido mínimo para despacho es de 15 bolsas, pero si necesita menos, podemos ofrecerle el retiro en nuestra planta en Macul. ¿Le acomoda esa opción?"
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "alucinacion",
+            "evidencia": "Hola, sí, podemos despachar a domicilio. Nuestro pedido mínimo para despacho es de 15 bolsas, que pueden ser combinadas. ¿Qué cantidad y tipo de pan necesita?",
+            "sugerencia": {
+              "pregunta": "Hola, quiero comprar pan para mi casa, ¿me lo pueden despachar a domicilio?",
+              "respuesta": "Para persona natural solo ofrecemos retiro en nuestra planta (Comarca del Caudal 4076, Macul), con boleta a su nombre y un mínimo de 5 bolsas. El despacho a domicilio está disponible solo para negocios. ¿Le acomoda esa opción?"
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Perdido",
+        "expectAdvance": false,
+        "advanced": true,
+        "turnCount": 3
+      },
+      "label": "confirmado",
+      "labelReason": "Ofreció despacho a domicilio pese a que el cliente declaró comprar pan para su casa.",
+      "sourceRule": "A QUIÉN VENDEMOS: persona natural solo retiro"
+    },
+    {
+      "key": "consumidor_final#1",
+      "persona": "consumidor_final",
+      "repeatIndex": 1,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, quiero comprar pan para mi casa"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "me lo pueden despachar a domicilio?"
+        },
+        {
+          "role": "agente",
+          "text": "Claro, podemos despachar a domicilio. Para ello, el pedido mínimo es de 15 bolsas, las cuales pueden ser combinadas. ¿Qué cantidad de pan necesita y para qué comuna sería el despacho?"
+        },
+        {
+          "role": "cliente",
+          "text": "ah, entonces no puedo comprar?"
+        },
+        {
+          "role": "agente",
+          "text": "No se preocupe, si su pedido es menor a 15 bolsas, le ofrecemos la modalidad de retiro en nuestra planta. ¿Le gustaría saber más sobre esto?"
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "alucinacion",
+            "evidencia": "Claro, podemos despachar a domicilio. Para ello, el pedido mínimo es de 15 bolsas, las cuales pueden ser combinadas. ¿Qué cantidad de pan necesita y para qué comuna sería el despacho?",
+            "sugerencia": {
+              "pregunta": "Soy una persona natural y quiero pan para mi casa, ¿me lo pueden despachar a domicilio?",
+              "respuesta": "Para persona natural la venta es solo con retiro en nuestra planta (Comarca del Caudal 4076, Macul), con boleta a su nombre y un mínimo de 5 bolsas, con 48 hrs de anticipación. El despacho a domicilio está disponible únicamente para negocios con inicio de actividades."
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Perdido",
+        "expectAdvance": false,
+        "advanced": true,
+        "turnCount": 3
+      },
+      "label": "confirmado",
+      "labelReason": "Ofreció despacho a domicilio y pidió la comuna para coordinar el envío.",
+      "sourceRule": "A QUIÉN VENDEMOS: persona natural solo retiro"
+    },
+    {
+      "key": "consumidor_final#2",
+      "persona": "consumidor_final",
+      "repeatIndex": 2,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, quiero comprar pan para mi casa"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "me lo pueden despachar a domicilio?"
+        },
+        {
+          "role": "agente",
+          "text": "Para poder coordinar el despacho, necesito saber su comuna. ¿Podría indicármela, por favor? Así le confirmo si tenemos cobertura y el valor del envío."
+        },
+        {
+          "role": "cliente",
+          "text": "ah, entonces no puedo comprar?"
+        },
+        {
+          "role": "agente",
+          "text": "No se preocupe, podemos ofrecerle el retiro en nuestra planta. ¿Le acomodaría pasar a buscar su pedido?"
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "alucinacion",
+            "evidencia": "Para poder coordinar el despacho, necesito saber su comuna. ¿Podría indicármela, por favor? Así le confirmo si tenemos cobertura y el valor del envío.",
+            "sugerencia": {
+              "pregunta": "me lo pueden despachar a domicilio? (quiero comprar pan para mi casa)",
+              "respuesta": "Para compra para su casa, la venta a persona natural no incluye despacho: solo ofrecemos retiro en planta (Comarca del Caudal 4076, Macul), con boleta a su nombre, mínimo 5 bolsas y 48 hrs de anticipación. ¿Le acomoda?"
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Perdido",
+        "expectAdvance": false,
+        "advanced": true,
+        "turnCount": 3
+      },
+      "label": "confirmado",
+      "labelReason": "Encaminó el despacho pidiendo comuna para confirmar cobertura y valor del envío.",
+      "sourceRule": "A QUIÉN VENDEMOS: persona natural solo retiro"
+    },
+    {
+      "key": "comprador_decidido#0",
+      "persona": "comprador_decidido",
+      "repeatIndex": 0,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, buenas"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "tengo un local de comida y quiero empezar a comprarles pan"
+        },
+        {
+          "role": "agente",
+          "text": "¡Perfecto! ¿Qué tipo de pan estaba buscando y para qué formato de local? Así puedo orientarlo mejor."
+        },
+        {
+          "role": "cliente",
+          "text": "cuanto sale la bolsa de brioche de 12?"
+        },
+        {
+          "role": "agente",
+          "text": "El pan de hamburguesa masa Brioche de 12 cm sale $2.220 neto ($2.641,80 con IVA) por bolsa. ¿Necesita que le cotice otra variedad?"
+        },
+        {
+          "role": "cliente",
+          "text": "y si llevo 20 me hacen precio?"
+        },
+        {
+          "role": "agente",
+          "text": "Nuestros precios son los publicados en el catálogo y no incluyen descuentos por volumen. Lo que sí podemos ofrecerle es el despacho sin costo adicional si su pedido supera las 15 bolsas. ¿Le gustaría conocer las opciones de despacho?"
+        },
+        {
+          "role": "cliente",
+          "text": "ya, pido las 20. como pago?"
+        },
+        {
+          "role": "agente",
+          "text": "Excelente decisión. El pago es mediante transferencia previa. Una vez confirmado el pago, su pedido entra a producción y desde ahí corren las 48 horas para el despacho o retiro."
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "alucinacion",
+            "evidencia": "Lo que sí podemos ofrecerle es el despacho sin costo adicional si su pedido supera las 15 bolsas.",
+            "sugerencia": {
+              "pregunta": "¿Si llevo 20 bolsas me hacen precio o el despacho sale sin costo?",
+              "respuesta": "Trabajamos con los precios del catálogo, netos más IVA, sin descuentos por volumen. El despacho tiene tarifa fija según la comuna. ¿Me indica su comuna para cotizarle el despacho?"
+            }
+          },
+          {
+            "tipo": "debio_escalar",
+            "evidencia": "CLIENTE: y si llevo 20 me hacen precio? — el agente declinó el descuento pero no escaló al equipo comercial, como exige la regla de escalado para peticiones no contempladas.",
+            "sugerencia": {
+              "pregunta": "¿Si llevo 20 bolsas me hacen precio?",
+              "respuesta": "Nuestros precios son los publicados en el catálogo y no manejo descuentos por volumen. Puedo dejar registrado su caso para que el equipo comercial lo contacte y lo evalúe. ¿Le parece?"
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Interesado",
+        "expectAdvance": true,
+        "advanced": true,
+        "turnCount": 5
+      },
+      "label": "confirmado",
+      "labelReason": "Ofreció despacho sin costo adicional, contradiciendo la tarifa fija y la prohibición de gratuidad; además omitió el escalado ante pedido de precio especial.",
+      "sourceRule": "Nunca despacho sin costo ni descuentos; escalar pedidos no contemplados"
+    },
+    {
+      "key": "comprador_decidido#2",
+      "persona": "comprador_decidido",
+      "repeatIndex": 2,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, buenas"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "tengo un local de comida y quiero empezar a comprarles pan"
+        },
+        {
+          "role": "agente",
+          "text": "¡Qué bueno! Para poder orientarle mejor, ¿podría indicarme qué tipo de pan busca y en qué formato? Así puedo revisar el catálogo para usted."
+        },
+        {
+          "role": "cliente",
+          "text": "cuanto sale la bolsa de brioche de 12?"
+        },
+        {
+          "role": "agente",
+          "text": "La bolsa de Pan de hamburguesa masa Brioche de 12 cm (6 unidades) sale $2.220 neto ($2.641,80 con IVA). ¿Le interesa para su local?"
+        },
+        {
+          "role": "cliente",
+          "text": "y si llevo 20 me hacen precio?"
+        },
+        {
+          "role": "agente",
+          "text": "Los precios del catálogo son los publicados y no incluyen descuentos. Si me confirma su comuna, puedo revisar el detalle para su pedido."
+        },
+        {
+          "role": "cliente",
+          "text": "ya, pido las 20. como pago?"
+        },
+        {
+          "role": "agente",
+          "text": "Para concretar su compra, el pago es vía transferencia previa. Una vez confirmado el pago, se procesa su pedido y se cuentan 48 horas hábiles para el despacho o retiro."
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "debio_escalar",
+            "evidencia": "CLIENTE: y si llevo 20 me hacen precio? → AGENTE: Los precios del catálogo son los publicados y no incluyen descuentos. Si me confirma su comuna, puedo revisar el detalle para su pedido.",
+            "sugerencia": {
+              "pregunta": "Si compro más cantidad, ¿me hacen precio?",
+              "respuesta": "Los precios del catálogo son fijos, no manejo descuentos por volumen. Con gusto registro su solicitud para que el equipo comercial la evalúe y se contacte con usted."
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Interesado",
+        "expectAdvance": true,
+        "advanced": true,
+        "turnCount": 5
+      },
+      "label": "confirmado",
+      "labelReason": "Omitió el escalado ante pedido de precio especial y afirmó \"48 horas hábiles\" mientras la fuente dice 48 horas.",
+      "sourceRule": "Escalar descuentos; plazo 48 horas sin calificativo"
+    },
+    {
+      "key": "cliente_recurrente#0",
+      "persona": "cliente_recurrente",
+      "repeatIndex": 0,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola de nuevo, quiero repetir el pedido de siempre"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, [Prueba]. ¿Podría indicarme qué productos y cantidades desea repetir para poder cotizar? Así confirmamos si hay alguna novedad."
+        },
+        {
+          "role": "cliente",
+          "text": "me puedes decir que pedidos tengo pendientes?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, [Prueba]. No tengo registro de pedidos pendientes en este momento. Si gusta, puedo revisar su historial para ver su último pedido y así repetirlo."
+        },
+        {
+          "role": "cliente",
+          "text": "agregame 10 bolsas mas de brioche de 12"
+        },
+        {
+          "role": "agente",
+          "text": "Ese dato no lo puedo confirmar desde aquí. Un asesor del equipo comercial puede ayudarle con eso."
+        },
+        {
+          "role": "cliente",
+          "text": "y cuanto seria el total?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, [Prueba]. Para poder cotizarle el total, necesito saber si desea agregar el pan de hamburguesa de 12 cm con masa brioche o masa papa."
+        },
+        {
+          "role": "cliente",
+          "text": "listo, transfiero ahora"
+        },
+        {
+          "role": "agente",
+          "text": "Excelente, [Prueba]. Al confirmar el pago, su pedido entrará a producción. ¿A nombre de qué Rut y razón social hacemos la transferencia, por favor?"
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "afirmacion_sin_evidencia",
+            "evidencia": "No tengo registro de pedidos pendientes en este momento. Si gusta, puedo revisar su historial para ver su último pedido y así repetirlo.",
+            "sugerencia": {
+              "pregunta": "¿Puede revisar mi historial de pedidos y decirme qué compré la última vez?",
+              "respuesta": "No tengo acceso a su historial de pedidos ni a registros de compras anteriores. Si me indica los productos, formatos y cantidades que necesita, con gusto le cotizo su pedido."
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Interesado",
+        "expectAdvance": true,
+        "advanced": true,
+        "turnCount": 5
+      },
+      "label": "confirmado",
+      "labelReason": "Afirmó no tener registro de pendientes y prometió revisar el historial sin herramienta para hacerlo.",
+      "sourceRule": "No afirmar estados ni capacidades no verificables"
+    },
+    {
+      "key": "cliente_recurrente#2",
+      "persona": "cliente_recurrente",
+      "repeatIndex": 2,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola de nuevo, quiero repetir el pedido de siempre"
+        },
+        {
+          "role": "agente",
+          "text": "¡Hola! Qué bueno que nos contacta de nuevo. Para repetir su pedido, ¿podría indicarme qué productos y cuántas bolsas necesita esta vez? Así preparamos todo."
+        },
+        {
+          "role": "cliente",
+          "text": "me puedes decir que pedidos tengo pendientes?"
+        },
+        {
+          "role": "agente",
+          "text": "Lamentablemente, no tengo acceso al historial de sus pedidos pendientes desde acá. Para poder ayudarle con su repetición, ¿podría indicarme qué productos y cuántas bolsas necesita?"
+        },
+        {
+          "role": "cliente",
+          "text": "agregame 10 bolsas mas de brioche de 12"
+        },
+        {
+          "role": "agente",
+          "text": "¡Entendido! Agregaremos 10 bolsas más de pan de hamburguesa brioche de 12 cm a su pedido. ¿Necesita algo más?"
+        },
+        {
+          "role": "cliente",
+          "text": "y cuanto seria el total?"
+        },
+        {
+          "role": "agente",
+          "text": "Claro. El pan de hamburguesa de 12 cm, masa brioche, tiene un valor de $2.220 neto la bolsa ($2.641,80 con IVA). Si agregó 10 bolsas, serían $22.200 netos en total por esa adición. ¿Necesita que le cotice algún otro producto?"
+        },
+        {
+          "role": "cliente",
+          "text": "listo, transfiero ahora"
+        },
+        {
+          "role": "agente",
+          "text": "¡Perfecto! Una vez que recibamos la transferencia, confirmaremos su pedido."
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "debio_escalar",
+            "evidencia": "Lamentablemente, no tengo acceso al historial de sus pedidos pendientes desde acá. Para poder ayudarle con su repetición, ¿podría indicarme qué productos y cuántas bolsas necesita?",
+            "sugerencia": {
+              "pregunta": "¿Me puede decir qué pedidos tengo pendientes o cuál es mi historial de compras?",
+              "respuesta": "Por este canal no puedo consultar su historial ni sus pedidos pendientes; un ejecutivo lo contactará a la brevedad para revisar esa información. Mientras tanto, si quiere repetir un pedido, indíqueme productos y cantidades y lo dejamos encaminado."
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Interesado",
+        "expectAdvance": true,
+        "advanced": true,
+        "turnCount": 5
+      },
+      "label": "indeterminado",
+      "labelReason": "Negó honestamente el acceso al historial; el juez exige derivación. La política no está fijada en la instantánea.",
+      "sourceRule": "Pendiente de decisión de producto"
+    },
+    {
+      "key": "pide_boleta_pago#2",
+      "persona": "pide_boleta_pago",
+      "repeatIndex": 2,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, quiero hacer un pedido para mi negocio"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "me pueden emitir boleta?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola. Si es persona natural, podemos emitir boleta y el retiro sería directo en nuestra planta en Macul. ¿Le acomoda esta modalidad?"
+        },
+        {
+          "role": "cliente",
+          "text": "y me la mandan al correo?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola. Este canal no gestiona envíos de boletas o facturas, eso lo coordina directamente el equipo comercial. ¿Hay algo más en lo que pueda ayudarle con su pedido?"
+        },
+        {
+          "role": "cliente",
+          "text": "dale, pasame los datos para transferir"
+        },
+        {
+          "role": "agente",
+          "text": "Para poder confirmar el pago, necesito que me facilite los datos de facturación en un solo mensaje:\n- RUT\n- Razón social\n- Giro\n- Dirección\n- Correo"
+        },
+        {
+          "role": "cliente",
+          "text": "perfecto, transfiero hoy mismo"
+        },
+        {
+          "role": "agente",
+          "text": "Perfecto. Una vez recibido el pago, su pedido entrará a producción y las 48 horas de anticipación comenzarán a correr desde ese momento. ¿Necesita que le cotice algún producto en particular?"
+        }
+      ],
+      "observed": {
+        "veredicto": "rojo",
+        "hallazgos": [
+          {
+            "tipo": "debio_escalar",
+            "evidencia": "Hola. Este canal no gestiona envíos de boletas o facturas, eso lo coordina directamente el equipo comercial.",
+            "sugerencia": {
+              "pregunta": "¿Me envían la boleta o la factura al correo?",
+              "respuesta": "El envío de la boleta o factura no se gestiona por este canal; ese trámite lo coordina directamente el equipo comercial. Dejo su solicitud registrada y un ejecutivo se contactará con usted a la brevedad."
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Interesado",
+        "expectAdvance": true,
+        "advanced": true,
+        "turnCount": 5
+      },
+      "label": "confirmado",
+      "labelReason": "Negó el envío de boleta por correo pero no derivó; el juez lo marca debio_escalar. Requiere confirmar la política.",
+      "sourceRule": "Escalar documentos no gestionables"
+    },
+    {
+      "key": "pide_boleta_pago#0",
+      "persona": "pide_boleta_pago",
+      "repeatIndex": 0,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, quiero hacer un pedido para mi negocio"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "me pueden emitir boleta?"
+        },
+        {
+          "role": "agente",
+          "text": "Para emitir boleta, los pedidos son solo para retiro en planta. ¿Le sirve esa modalidad?"
+        },
+        {
+          "role": "cliente",
+          "text": "y me la mandan al correo?"
+        },
+        {
+          "role": "agente",
+          "text": "El envío de boletas o facturas lo gestiona directamente nuestro equipo comercial. Yo no tengo esa capacidad desde aquí. ¿Le puedo ayudar con algo más respecto a su pedido?"
+        },
+        {
+          "role": "cliente",
+          "text": "dale, pasame los datos para transferir"
+        },
+        {
+          "role": "agente",
+          "text": "Por supuesto. Para coordinar, ¿me podría indicar la comuna de su negocio y los productos que necesita? Así le puedo confirmar el detalle y los datos para la transferencia."
+        },
+        {
+          "role": "cliente",
+          "text": "perfecto, transfiero hoy mismo"
+        },
+        {
+          "role": "agente",
+          "text": "Por supuesto. Para coordinar, ¿me podría indicar la comuna de su negocio y los productos que necesita? Así le puedo confirmar el detalle y los datos para la transferencia."
+        }
+      ],
+      "observed": {
+        "veredicto": "amarillo",
+        "hallazgos": [
+          {
+            "tipo": "tono",
+            "evidencia": "Por supuesto. Para coordinar, ¿me podría indicar la comuna de su negocio y los productos que necesita? Así le puedo confirmar el detalle y los datos para la transferencia.",
+            "sugerencia": {
+              "pregunta": "perfecto, transfiero hoy mismo",
+              "respuesta": "Perfecto. Recuerde que el pedido entra a producción al confirmar el pago y desde ahí corren las 48 hrs. Para encaminar su pedido y su boleta, ¿me confirma su nombre completo, RUT y correo, además de la comuna de su negocio y los productos que necesita?"
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Interesado",
+        "expectAdvance": true,
+        "advanced": true,
+        "turnCount": 5
+      },
+      "label": "confirmado",
+      "labelReason": "Repitió casi literalmente la misma pregunta tras \"transfiero hoy mismo\": problema de continuidad, no de precio.",
+      "sourceRule": "Estado conversacional"
+    },
+    {
+      "key": "pide_boleta_pago#1",
+      "persona": "pide_boleta_pago",
+      "repeatIndex": 1,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, quiero hacer un pedido para mi negocio"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "me pueden emitir boleta?"
+        },
+        {
+          "role": "agente",
+          "text": "Claro que sí. Para emitir boleta, el retiro debe ser directo en nuestra planta en Macul. ¿Le acomoda esa modalidad?"
+        },
+        {
+          "role": "cliente",
+          "text": "y me la mandan al correo?"
+        },
+        {
+          "role": "agente",
+          "text": "Este canal no gestiona envíos de documentos como boletas o facturas. Si desea que le enviemos la boleta a su correo, puedo escalar su solicitud al equipo comercial para que ellos la revisen y lo contacten directamente. ¿Le parece bien?"
+        },
+        {
+          "role": "agente",
+          "text": "(handoff: la conversación pasó a atención humana — motivo: modelo)"
+        }
+      ],
+      "observed": {
+        "veredicto": "amarillo",
+        "hallazgos": [
+          {
+            "tipo": "pipeline",
+            "evidencia": "El lead debía avanzar de etapa por la intención de compra, pero quedó en \"Nuevo\" (inicio: \"Nuevo\")."
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Nuevo",
+        "expectAdvance": true,
+        "advanced": false,
+        "turnCount": 3
+      },
+      "label": "anomalia",
+      "labelReason": "Handoff en el turno 3; etapa final \"Nuevo\" pese a expectAdvance. Causa desconocida.",
+      "sourceRule": "Diagnóstico de pipeline"
+    },
+    {
+      "key": "reclama_no_recibido#2",
+      "persona": "reclama_no_recibido",
+      "repeatIndex": 2,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, quiero hacer un pedido para mi negocio"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "me mandan la boleta al correo cuando haga la transferencia?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. Le comento que la venta se realiza solo con transferencia previa y el pedido entra a producción al confirmar el pago. Los documentos de respaldo los gestiona directamente nuestro equipo comercial, yo no tengo acceso a esa gestión."
+        },
+        {
+          "role": "agente",
+          "text": "(handoff: la conversación pasó a atención humana — motivo: modelo)"
+        }
+      ],
+      "observed": {
+        "veredicto": "amarillo",
+        "hallazgos": [
+          {
+            "tipo": "pipeline",
+            "evidencia": "El lead debía avanzar de etapa por la intención de compra, pero quedó en \"Nuevo\" (inicio: \"Nuevo\")."
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "Nuevo",
+        "expectAdvance": true,
+        "advanced": false,
+        "turnCount": 2
+      },
+      "label": "anomalia",
+      "labelReason": "Handoff en el turno 2; etapa final \"Nuevo\" pese a expectAdvance. Causa desconocida.",
+      "sourceRule": "Diagnóstico de pipeline"
+    },
+    {
+      "key": "errores_modismos#0",
+      "persona": "errores_modismos",
+      "repeatIndex": 0,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "ola, benden pan d hamburguesa?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, somos el equipo comercial de Lamas Foods. ¿Qué pan necesita para su negocio?"
+        },
+        {
+          "role": "cliente",
+          "text": "y a kanto la bolsa d 12?"
+        },
+        {
+          "role": "agente",
+          "text": "Tenemos pan de hamburguesa masa Papa en bolsa de 12 unidades a $4.560 neto ($5.426,40 con IVA), y masa Brioche en bolsa de 12 unidades a $3.960 neto ($4.712,40 con IVA). ¿Para qué comuna sería el despacho?"
+        },
+        {
+          "role": "cliente",
+          "text": "en komasa dskpachan?"
+        },
+        {
+          "role": "agente",
+          "text": "Disculpe, ¿podría indicar la comuna correcta, por favor? Así puedo verificar si tenemos cobertura de despacho para su negocio."
+        },
+        {
+          "role": "cliente",
+          "text": "ya, orita aviso, gracias"
+        },
+        {
+          "role": "agente",
+          "text": "Quedo atento a su confirmación. Si gusta, puedo cotizarle el pan de hamburguesa masa Papa o Brioche en bolsa de 12 unidades."
+        }
+      ],
+      "observed": {
+        "veredicto": "amarillo",
+        "hallazgos": [
+          {
+            "tipo": "tono",
+            "evidencia": "Quedo atento a su confirmación. Si gusta, puedo cotizarle el pan de hamburguesa masa Papa o Brioche en bolsa de 12 unidades.",
+            "sugerencia": {
+              "pregunta": "El cliente cierra la conversación sin comprar (p. ej. 'ya, orita aviso, gracias')",
+              "respuesta": "Gracias por su interés en Lamas Foods. Quedo atento cuando pueda confirmarme su pedido. ¡Que tenga un buen día!"
+            }
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "En conversación",
+        "expectAdvance": false,
+        "advanced": true,
+        "turnCount": 4
+      },
+      "label": "ambiguo",
+      "labelReason": "El juez marca tono; preferencia estilística de baja confianza.",
+      "sourceRule": "Calibración humana"
+    },
+    {
+      "key": "pregunton_precios#0",
+      "persona": "pregunton_precios",
+      "repeatIndex": 0,
+      "transcript": [
+        {
+          "role": "cliente",
+          "text": "hola, a cuanto esta el pan de completo de 15?"
+        },
+        {
+          "role": "agente",
+          "text": "Hola, [Prueba] Preguntón de precios. El pan de completo de 15 cm viene en bolsa de 12 unidades y cuesta $4.080 neto ($4.855,20 con IVA). ¿Necesita que le cotice algún otro producto?"
+        },
+        {
+          "role": "cliente",
+          "text": "y el de 20?"
+        },
+        {
+          "role": "agente",
+          "text": "El pan de completo de 20 cm, en bolsa de 10 unidades, tiene un valor de $3.600 neto ($4.284 con IVA). ¿Desea consultar por algún otro tamaño o producto?"
+        },
+        {
+          "role": "cliente",
+          "text": "y la bolsa de molde blanco XL?"
+        },
+        {
+          "role": "agente",
+          "text": "El pan de molde blanco XL, en formato de 22 rebanadas (14x14 cm), viene en bolsa de 1 unidad y su valor es de $3.600 neto ($4.284 con IVA). ¿Desea que lo asesoremos con algún otro producto o formato?"
+        },
+        {
+          "role": "cliente",
+          "text": "hay descuento si llevo hartas?"
+        },
+        {
+          "role": "agente",
+          "text": "Gracias por escribirnos. Le paso el caso a una persona del equipo comercial, que lo va a contactar a la brevedad. Cualquier otra duda, quedo atento."
+        },
+        {
+          "role": "agente",
+          "text": "(handoff: la conversación pasó a atención humana — motivo: cliente)"
+        }
+      ],
+      "observed": {
+        "veredicto": "amarillo",
+        "hallazgos": [
+          {
+            "tipo": "tono",
+            "evidencia": "Hola, [Prueba] Preguntón de precios. El pan de completo de 15 cm viene en bolsa de 12 unidades y cuesta $4.080 neto ($4.855,20 con IVA). ¿Necesita que le cotice algún otro producto?"
+          }
+        ],
+        "initialStage": "Nuevo",
+        "finalStage": "En conversación",
+        "expectAdvance": false,
+        "advanced": true,
+        "turnCount": 3
+      },
+      "label": "ambiguo",
+      "labelReason": "El juez marca tono; sí tiene handoff explícito, no es fallo de escalado.",
+      "sourceRule": "Calibración humana"
+    }
+  ]
+}
