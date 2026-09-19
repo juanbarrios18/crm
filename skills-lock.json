@@ -6,6 +6,18 @@
       "sourceType": "github",
       "skillPath": "SKILL.md",
       "computedHash": "3b7da4bba2711d3b8d09e6dbecee50e914807b00f54ab1559cbf2c76933c1317"
+    },
+    "context-engineering": {
+      "source": "addyosmani/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/context-engineering/SKILL.md",
+      "computedHash": "807434a4b178635a5539a1da241815ba7228f00b71f8e3ccd529472ce3bcaf80"
+    },
+    "context-engineering-collection": {
+      "source": "muratcankoylan/agent-skills-for-context-engineering",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "1a2dbf15cf46137bae376d83c933068c72ddb96d5275e38cdf384b35793502e8"
     }
   }
 }
