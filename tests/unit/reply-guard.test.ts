@@ -274,6 +274,14 @@ describe("guardReply — nombre repetido (T001)", () => {
     expect(isRepeatedName("El pan rosado no aplica.", ctx)).toBe(false);
   });
 
+  it("no marca 'rosa' en 'rosa mosqueta': es token completo, pero no vocativo (T005)", () => {
+    // El comentario anterior afirmaba que "rosa" no disparaba por ser parte de
+    // otra palabra; "rosa mosqueta" es un token completo. Lo que lo excluye es
+    // el artículo que lo precede, no la segmentación.
+    const ctx = context({ contactName: "Rosa Diaz", previousAgentReplies: ["Gracias, Rosa."] });
+    expect(isRepeatedName("La rosa mosqueta cuesta $3.000.", ctx)).toBe(false);
+  });
+
   it("stripContactName elimina el nombre y conserva el contenido", () => {
     expect(
       stripContactName("Roberto, el pedido mínimo para despacho es de 15 bolsas", CONTACT)
@@ -312,11 +320,174 @@ describe("guardReply — nombre repetido (T001)", () => {
   });
 });
 
+/**
+ * T005 — el guard mide VOCATIVO, no coincidencia de token.
+ *
+ * La verificación adversarial probó que contar cualquier aparición del token
+ * corrompía mensajes correctos: "Santiago" es comuna del catálogo y nombre
+ * chileno, así que "El despacho a Santiago cuesta $5.000." se vetaba y se
+ * entregaba como "El despacho a cuesta $5.000.".
+ */
+describe("guardReply — nombre repetido: vocativo vs coincidencia léxica (T005)", () => {
+  const context = (over: Partial<GuardContext> = {}): GuardContext => ({
+    greeting: null,
+    agentTurnsBefore: 1,
+    previousAgentReplies: [],
+    ...over,
+  });
+
+  it("no veta la comuna Santiago aunque el saliente previo la nombre", () => {
+    const ctx = context({
+      contactName: "Santiago Perez",
+      previousAgentReplies: ["Hacemos despachos en Santiago con un costo de $5.000."],
+    });
+    const reply = "El despacho a Santiago cuesta $5.000.";
+    expect(isRepeatedName(reply, ctx)).toBe(false);
+    expect(stripContactName(reply, "Santiago Perez")).toBe(reply);
+  });
+
+  it("no veta el producto 'rosa mosqueta' con contacto 'Rosa Diaz'", () => {
+    const ctx = context({
+      contactName: "Rosa Diaz",
+      previousAgentReplies: ["Hacemos despachos en Rosa con un costo de $5.000."],
+    });
+    expect(isRepeatedName("La rosa mosqueta cuesta $3.000.", ctx)).toBe(false);
+  });
+
+  it("no veta un nombre de empresa precedido por preposición", () => {
+    const reply = "En Panaderia El Trigo, el despacho cuesta $5.000.";
+    const ctx = context({
+      contactName: "Panaderia El Trigo",
+      previousAgentReplies: [reply],
+    });
+    expect(isRepeatedName(reply, ctx)).toBe(false);
+    expect(stripContactName(reply, "Panaderia El Trigo")).toBe(reply);
+  });
+
+  it("reproduce la conversación de PROD: la 1ª mención no dispara, las siguientes sí", () => {
+    const contactName = "Roberto Gonzalez";
+    const msg2 = "Hola, Roberto. Somos el equipo comercial de Lamas Foods, ¿qué necesita?";
+    const msg4 = "¡Hola Roberto! Qué bueno saber de usted. En La Florida, tenemos pan de completo.";
+    const msg8 = "Sí, Roberto. Hacemos despachos en La Florida con un costo de $5.000.";
+    const msg10 = "Roberto, el pedido mínimo para despacho es de 15 bolsas.";
+
+    // msg2: primera mención, sin salientes previos → permitida.
+    expect(
+      isRepeatedName(msg2, context({ contactName, previousAgentReplies: [] }))
+    ).toBe(false);
+
+    // msg4/msg8/msg10: el nombre ya se usó como vocativo → vetadas.
+    expect(isRepeatedName(msg4, context({ contactName, previousAgentReplies: [msg2] }))).toBe(
+      true
+    );
+    expect(
+      isRepeatedName(msg8, context({ contactName, previousAgentReplies: [msg2, msg4] }))
+    ).toBe(true);
+    expect(
+      isRepeatedName(msg10, context({ contactName, previousAgentReplies: [msg2, msg8] }))
+    ).toBe(true);
+  });
+
+  it("no dispara si el saliente previo solo mencionó el nombre sin vocativo", () => {
+    const ctx = context({
+      contactName: "Roberto Gonzalez",
+      previousAgentReplies: ["El despacho a Roberto cuesta $5.000."],
+    });
+    expect(isRepeatedName("Roberto, el pedido mínimo es de 15 bolsas.", ctx)).toBe(false);
+  });
+
+  it("reconoce el vocativo de un nombre con tilde", () => {
+    const ctx = context({
+      contactName: "José Muñoz",
+      previousAgentReplies: ["Hola, José. Somos el equipo comercial."],
+    });
+    expect(isRepeatedName("José, el precio es $5.000.", ctx)).toBe(true);
+    expect(stripContactName("José, el precio es $5.000.", "José Muñoz")).toBe(
+      "El precio es $5.000."
+    );
+  });
+});
+
+describe("stripContactName — solo vocativos (T005)", () => {
+  const CONTACT = "Roberto Gonzalez";
+  const prior: readonly string[] = ["Hola, Roberto. Somos el equipo comercial."];
+
+  it("quita el vocativo al inicio y capitaliza", () => {
+    expect(stripContactName("Roberto, el pedido mínimo para despacho es de 15 bolsas.", CONTACT)).toBe(
+      "El pedido mínimo para despacho es de 15 bolsas."
+    );
+  });
+
+  it("consume el delimitador interior y no deja coma huérfana", () => {
+    expect(
+      stripContactName(
+        "Sí, Roberto. Hacemos despachos en La Florida con un costo de $5.000.",
+        CONTACT
+      )
+    ).toBe("Sí. Hacemos despachos en La Florida con un costo de $5.000.");
+  });
+
+  it("quita el vocativo tras la interjección de saludo", () => {
+    expect(stripContactName("¡Hola Roberto! Qué bueno saber de usted.", CONTACT)).toBe(
+      "¡Hola! Qué bueno saber de usted."
+    );
+  });
+
+  it("conserva los signos de apertura y capitaliza tras ellos", () => {
+    expect(stripContactName("¿Roberto, me confirma la comuna?", CONTACT)).toBe(
+      "¿Me confirma la comuna?"
+    );
+  });
+
+  it("consume el dos puntos posterior cuando no hay delimitador previo", () => {
+    expect(stripContactName("Roberto: el precio es $5.000.", CONTACT)).toBe(
+      "El precio es $5.000."
+    );
+  });
+
+  it("consume el punto y coma previo", () => {
+    expect(stripContactName("Gracias, Roberto; quedamos atentos.", CONTACT)).toBe(
+      "Gracias; quedamos atentos."
+    );
+  });
+
+  it("quita el nombre completo sin mayúscula rara en mitad de oración", () => {
+    expect(stripContactName("Roberto y Gonzalez, el precio es $5.000.", CONTACT)).toBe(
+      "El precio es $5.000."
+    );
+  });
+
+  it("el mensaje que era solo el nombre cae en el fallback seguro", () => {
+    expect(stripContactName("Roberto Gonzalez.", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+    expect(stripContactName("¿Roberto?", CONTACT)).toBe(SAFE_FALLBACK_REPLY);
+  });
+
+  it("sin nombre no toca la respuesta", () => {
+    expect(stripContactName("El despacho cuesta $5.000.", null)).toBe(
+      "El despacho cuesta $5.000."
+    );
+  });
+
+  it("no recorta si el primer token del nombre mide menos de 4", () => {
+    expect(stripContactName("Ana, el pedido mínimo es de 15 bolsas.", "Ana")).toBe(
+      "Ana, el pedido mínimo es de 15 bolsas."
+    );
+  });
+
+  it("el vocativo ya usado antes no se confunde con la comuna", () => {
+    const reply = "El despacho a Santiago cuesta $5.000.";
+    expect(prior.length).toBeGreaterThan(0);
+    expect(stripContactName(reply, "Santiago Perez")).toBe(reply);
+  });
+});
+
 describe("resolveUncorrectedReply", () => {
+  const ctx: GuardContext = { greeting: null, agentTurnsBefore: 1 };
+
   it("conserva la original si la única violación era el saludo repetido", () => {
     const original = "¡Hola! Su volumen semanal es alto, un ejecutivo lo contactará.";
     expect(
-      resolveUncorrectedReply(original, [{ kind: "saludo_repetido", detail: original }])
+      resolveUncorrectedReply(original, [{ kind: "saludo_repetido", detail: original }], ctx)
     ).toBe(original);
   });
 
@@ -325,22 +496,26 @@ describe("resolveUncorrectedReply", () => {
     // genérico perdería la respuesta. Se conserva, igual que el saludo repetido.
     const original = "Por supuesto. ¿Me indica la comuna de su negocio y los productos?";
     expect(
-      resolveUncorrectedReply(original, [{ kind: "respuesta_repetida", detail: original }])
+      resolveUncorrectedReply(original, [{ kind: "respuesta_repetida", detail: original }], ctx)
     ).toBe(original);
   });
 
   it("entrega la respuesta segura si había una violación de hechos", () => {
     expect(
-      resolveUncorrectedReply("Sale $9.999 neto.", [{ kind: "precio", detail: "$9.999" }])
+      resolveUncorrectedReply("Sale $9.999 neto.", [{ kind: "precio", detail: "$9.999" }], ctx)
     ).toBe(SAFE_FALLBACK_REPLY);
   });
 
   it("entrega la respuesta segura si conviven saludo repetido y violación de hechos", () => {
     expect(
-      resolveUncorrectedReply("¡Hola! Sale $9.999 neto.", [
-        { kind: "saludo_repetido", detail: "¡Hola!" },
-        { kind: "precio", detail: "$9.999" },
-      ])
+      resolveUncorrectedReply(
+        "¡Hola! Sale $9.999 neto.",
+        [
+          { kind: "saludo_repetido", detail: "¡Hola!" },
+          { kind: "precio", detail: "$9.999" },
+        ],
+        ctx
+      )
     ).toBe(SAFE_FALLBACK_REPLY);
   });
 
@@ -354,9 +529,11 @@ describe("resolveUncorrectedReply", () => {
   it("entrega la respuesta segura si la violación es comercial", () => {
     const original = "El despacho es sin costo.";
     expect(
-      resolveUncorrectedReply(original, [
-        { kind: "despacho_gratuito", detail: "despacho sin costo" },
-      ])
+      resolveUncorrectedReply(
+        original,
+        [{ kind: "despacho_gratuito", detail: "despacho sin costo" }],
+        ctx
+      )
     ).toBe(SAFE_FALLBACK_REPLY);
   });
 });

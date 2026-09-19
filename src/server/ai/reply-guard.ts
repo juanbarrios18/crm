@@ -226,10 +226,10 @@ export function isRepeatedReply(reply: string, context: GuardContext): boolean {
 }
 
 /**
- * T001 — Largo mínimo del token de nombre que se evalúa. Nombres de una sola
- * sílaba ("Ana", "Sol", "Paz") quedan fuera a propósito: un token de 3 letras o
- * menos es demasiado corto para distinguirlo de una palabra común sin vetar
- * respuestas correctas.
+ * T001/T005 — Largo mínimo del token de nombre que se evalúa. Nombres de una
+ * sola sílaba ("Ana", "Sol", "Paz") quedan fuera a propósito: un token de 3
+ * letras o menos es demasiado corto para distinguirlo de una palabra común sin
+ * vetar respuestas correctas.
  */
 const MIN_NAME_TOKEN_LENGTH = 4;
 
@@ -239,22 +239,72 @@ function nameTokens(contactName: string): string[] {
 }
 
 /**
- * T001 — Detecta que la respuesta vuelve a nombrar al contacto.
+ * T005 — Signos que, inmediatamente antes del nombre, lo marcan como VOCATIVO:
+ * una llamada directa al interlocutor. `.` y `?`/`!` quedan fuera a propósito:
+ * cierran una oración y el nombre que sigue abre otra, no es un trato.
+ */
+const VOCATIVE_BOUNDARY = new Set([",", ";", ":", "¡", "¿", "(", "—", "–", "-"]);
+
+/** Interjecciones de saludo que convierten el nombre siguiente en vocativo. */
+const VOCATIVE_GREETINGS = new Set(["hola", "buenas", "buenos"]);
+
+/**
+ * T005 — ¿La aparición del nombre que empieza en `index` es un VOCATIVO?
+ *
+ * Se mira hacia atrás saltando espacios: es vocativo si está al inicio del
+ * texto, si lo precede un signo de `VOCATIVE_BOUNDARY`, o si lo precede una
+ * interjección de saludo. Cualquier otra cosa —un artículo o una preposición
+ * ("en Santiago", "la rosa mosqueta", "a Roberto")— lo deja fuera: es una
+ * comuna, un producto o una empresa, no un trato directo.
+ */
+function isVocativeAt(text: string, index: number): boolean {
+  let i = index - 1;
+  while (i >= 0 && /\s/u.test(text[i]!)) i -= 1;
+  if (i < 0) return true;
+  if (VOCATIVE_BOUNDARY.has(text[i]!)) return true;
+  let start = i;
+  while (start >= 0 && /[\p{L}\p{N}]/u.test(text[start]!)) start -= 1;
+  return VOCATIVE_GREETINGS.has(normalizeLoose(text.slice(start + 1, i + 1)));
+}
+
+/**
+ * ¿El texto usa el token del nombre como vocativo?
+ *
+ * Se recorre el texto por palabras (con `wordSpans`, que normaliza tildes) y no
+ * por regex sobre el texto crudo: un nombre con tilde ("José") nunca coincidiría
+ * contra su forma normalizada ("jose").
+ */
+function hasVocativeToken(text: string, token: string): boolean {
+  for (const span of wordSpans(text)) {
+    if (span.norm === token && isVocativeAt(text, span.start)) return true;
+  }
+  return false;
+}
+
+/**
+ * T001/T005 — Detecta que la respuesta vuelve a nombrar al contacto COMO
+ * VOCATIVO.
  *
  * Regla de producto: el nombre aparece COMO MÁXIMO UNA vez en los salientes del
  * agente. Medido en PROD, el modelo lo repetía en casi cada turno porque la
  * ficha con `- Nombre:` viaja pegada al último mensaje del cliente en cada
  * vuelta.
  *
+ * T005: contar cualquier aparición del token corrompía mensajes correctos.
+ * "Santiago" es comuna del catálogo y nombre chileno; con el saliente previo
+ * "Hacemos despachos en Santiago...", la respuesta "El despacho a Santiago
+ * cuesta $5.000." quedaba vetada y se entregaba sin la comuna. Por eso la
+ * aparición solo cuenta si es un vocativo (ver `isVocativeAt`) y el saliente
+ * previo también lo usó como vocativo.
+ *
  * Conservador por diseño:
  * - Sin `contactName` (o sin tokens) → `false`.
  * - Token de detección: el PRIMER token del nombre normalizado ("Roberto", no
- *   "Roberto Gonzalez"). Exige `MIN_NAME_TOKEN_LENGTH` para evitar falsos
- *   positivos con palabras cortas.
- * - Comparación por TOKEN COMPLETO sobre `normalizeLoose`, nunca por substring:
- *   "rosa" no dispara con "rosa mosqueta" como parte de otra palabra.
- * - SOLO dispara si el nombre ya apareció en algún saliente previo: la primera
- *   mención nunca se veta. Sin `previousAgentReplies` → `false`.
+ *   "Roberto Gonzalez"). Exige `MIN_NAME_TOKEN_LENGTH`.
+ * - Comparación por TOKEN COMPLETO, nunca por substring.
+ * - SOLO dispara si el nombre ya apareció COMO VOCATIVO en algún saliente
+ *   previo: la primera mención nunca se veta. Sin `previousAgentReplies` →
+ *   `false`.
  */
 export function isRepeatedName(reply: string, context: GuardContext): boolean {
   const contactName = context.contactName?.trim();
@@ -263,14 +313,9 @@ export function isRepeatedName(reply: string, context: GuardContext): boolean {
   if (!firstToken || firstToken.length < MIN_NAME_TOKEN_LENGTH) return false;
   const previous = context.previousAgentReplies;
   if (!previous || previous.length === 0) return false;
-  if (!new Set(tokensOf(normalizeLoose(reply))).has(firstToken)) return false;
-  return previous.some((prior) =>
-    new Set(tokensOf(normalizeLoose(prior))).has(firstToken)
-  );
+  if (!hasVocativeToken(reply, firstToken)) return false;
+  return previous.some((prior) => hasVocativeToken(prior, firstToken));
 }
-
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Primera letra alfabética a mayúscula, sin tocar el resto del texto. */
 function capitalizeFirstLetter(text: string): string {
@@ -280,36 +325,109 @@ function capitalizeFirstLetter(text: string): string {
   return text.slice(0, index) + text[index]!.toUpperCase() + text.slice(index + 1);
 }
 
+/** Palabra (letras/números) con su rango en el texto original. */
+type WordSpan = { norm: string; start: number; end: number };
+
+/** Palabras con su posición, para operar siempre por token completo. */
+function wordSpans(text: string): WordSpan[] {
+  const re = /[\p{L}\p{N}]+/gu;
+  const spans: WordSpan[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    spans.push({
+      norm: normalizeLoose(match[0]),
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+  return spans;
+}
+
 /**
- * Limpia la puntuación que quedó huérfana al quitar el nombre: espacios
- * duplicados, espacio antes de signo, corridas de signos y puntuación inicial.
- * Las corridas conservan el signo de mayor jerarquía (! > . > ,) para no dejar
- * un separador suelto donde estaba el nombre.
+ * T005 — Limpia la puntuación que queda al quitar un vocativo. NO capitaliza:
+ * eso lo decide `stripContactName`, que sabe si la remoción tocó el inicio del
+ * texto. Reglas: colapsa espacios, pega el signo a la palabra, colapsa corridas
+ * de separadores y quita la puntuación huérfana del inicio sin borrar `¿` ni `¡`.
  */
 function collapseOrphanPunctuation(text: string): string {
-  const out = text
+  return text
     .replace(/[ \t]{2,}/g, " ")
-    .replace(/\s+([,!.])/g, "$1")
-    .replace(/[.!]{2,}/g, (run) => (run.includes("!") ? "!" : "."))
-    .replace(/,[.!]/g, (run) => run.slice(1))
-    .replace(/([.!]),/g, "$1")
-    .replace(/^[\s,!.]+/u, "")
-    .replace(/\s+([,!.])/g, "$1")
+    .replace(/\s+([,;:.!?])/g, "$1")
+    .replace(/[,;:]{2,}/g, ",")
+    .replace(/[.!]{2,}/g, ".")
+    .replace(/([.!?]),/g, "$1")
+    .replace(/,\./g, ".")
+    .replace(/([¿¡])\s+/g, "$1")
+    .replace(/^[\s.,;:!?]+/u, "")
     .trim();
+}
+
+/**
+ * T005 — Tramos del texto donde el nombre aparece como VOCATIVO.
+ *
+ * Recorre el texto por palabras y agrupa los tokens del nombre, incluidos los
+ * unidos por un conector ("Roberto y Gonzalez" es el mismo nombre). El ancla es
+ * SIEMPRE el primer token del nombre (`firstToken`, el mismo de la detección):
+ * así un token posterior que también sea palabra común ("El" de "Panaderia El
+ * Trigo") no abre un tramo propio. El tramo cuenta solo si su ancla es vocativa
+ * (ver `isVocativeAt`): "en Santiago", "la rosa mosqueta" o "a Roberto" quedan
+ * fuera y no se borran.
+ */
+function findVocativeSpans(
+  reply: string,
+  name: string,
+  firstToken: string
+): { start: number; end: number }[] {
+  const nameSet = new Set(nameTokens(name));
+  const spans = wordSpans(reply);
+  const out: { start: number; end: number }[] = [];
+  let i = 0;
+  while (i < spans.length) {
+    const first = spans[i]!;
+    if (first.norm !== firstToken) {
+      i += 1;
+      continue;
+    }
+    let end = first.end;
+    let j = i + 1;
+    while (j < spans.length) {
+      const next = spans[j]!;
+      if (!/^\s*$/.test(reply.slice(end, next.start))) break;
+      if (nameSet.has(next.norm)) {
+        end = next.end;
+        j += 1;
+        continue;
+      }
+      const after = spans[j + 1];
+      if (
+        /^(y|e)$/u.test(next.norm) &&
+        after &&
+        nameSet.has(after.norm) &&
+        /^\s*$/.test(reply.slice(next.end, after.start))
+      ) {
+        end = after.end;
+        j += 2;
+        continue;
+      }
+      break;
+    }
+    if (isVocativeAt(reply, first.start)) out.push({ start: first.start, end });
+    i = j;
+  }
   return out;
 }
 
 /**
- * T001 — Respaldo determinista del nombre repetido: entrega el contenido SIN el
- * nombre en vez del fallback genérico.
+ * T001/T005 — Respaldo determinista del nombre repetido: entrega el contenido
+ * SIN el vocativo en vez del fallback genérico.
  *
  * El nombre es una falla de estilo, no de hechos: reemplazar la respuesta por
- * `SAFE_FALLBACK_REPLY` borraría contenido válido (lección de `run_pk41`: el
- * fallback genérico perdió el aviso de escalado y el juez lo marcó grave). Se
- * eliminan las ocurrencias del nombre completo y de sus tokens de largo
- * suficiente usando lookarounds Unicode `(?<!\p{L})` / `(?!\p{L})`; NO `\b`
- * porque no reconoce vocales acentuadas. Si tras limpiar no queda contenido con
- * letras o números, se devuelve `SAFE_FALLBACK_REPLY`.
+ * `SAFE_FALLBACK_REPLY` borraría contenido válido (lección de `run_pk41`). Se
+ * eliminan SOLO las apariciones vocativas (T005), no las comunas, productos o
+ * empresas que comparten el token. Al quitar una, se consume el delimitador
+ * interior (`;` `:` `,`): el de la izquierda si existe; si no, uno posterior.
+ * Nunca se consumen `.!?`. Si tras limpiar no queda letra ni número, se
+ * devuelve `SAFE_FALLBACK_REPLY`.
  */
 export function stripContactName(
   reply: string,
@@ -317,23 +435,44 @@ export function stripContactName(
 ): string {
   const name = contactName?.trim();
   if (!name) return reply;
-  const normalizedTokens = nameTokens(name);
-  const originalTokens = name.split(/\s+/).filter(Boolean);
-  const needles = [
-    name,
-    ...originalTokens.filter((t) => t.length >= MIN_NAME_TOKEN_LENGTH),
-    normalizeLoose(name),
-    ...normalizedTokens.filter((t) => t.length >= MIN_NAME_TOKEN_LENGTH),
-  ].filter((needle, i, arr) => needle.length > 0 && arr.indexOf(needle) === i);
-  if (needles.length === 0) return reply;
-  // Orden por largo descendente: la forma completa se consume antes que sus
-  // partes para no dejar fragmentos intermedios.
-  const alternation = needles
-    .sort((a, b) => b.length - a.length)
-    .map(escapeRegExp)
-    .join("|");
-  const pattern = new RegExp(`(?<!\\p{L})(?:${alternation})(?!\\p{L})`, "giu");
-  const stripped = capitalizeFirstLetter(collapseOrphanPunctuation(reply.replace(pattern, "")));
+  const firstToken = nameTokens(name)[0];
+  // Misma guarda de largo que la detección: un nombre corto no se recorta.
+  if (!firstToken || firstToken.length < MIN_NAME_TOKEN_LENGTH) return reply;
+
+  const vocatives = findVocativeSpans(reply, name, firstToken);
+  if (vocatives.length === 0) return reply;
+
+  const removals: { start: number; end: number }[] = [];
+  for (const span of vocatives) {
+    let start = span.start;
+    let end = span.end;
+    let left = start - 1;
+    while (left >= 0 && /[ \t]/.test(reply[left]!)) left -= 1;
+    if (left >= 0 && /[,;:]/.test(reply[left]!)) {
+      start = left;
+    } else {
+      let right = end;
+      while (right < reply.length && /[ \t]/.test(reply[right]!)) right += 1;
+      if (right < reply.length && /[,;:]/.test(reply[right]!)) end = right + 1;
+    }
+    removals.push({ start, end });
+  }
+
+  let stripped = "";
+  let cursor = 0;
+  for (const r of removals) {
+    if (r.start < cursor) continue;
+    stripped += reply.slice(cursor, r.start);
+    cursor = r.end;
+  }
+  stripped += reply.slice(cursor);
+
+  const removedAtStart = removals.some((r) => r.start === 0);
+  stripped = collapseOrphanPunctuation(stripped);
+  // Capitaliza solo si la remoción tocó el inicio, o tras `¿`/`¡` en minúscula.
+  if (removedAtStart || /^[¿¡]\s*\p{Ll}/u.test(stripped)) {
+    stripped = capitalizeFirstLetter(stripped);
+  }
   if (!/[\p{L}\p{N}]/u.test(stripped)) return SAFE_FALLBACK_REPLY;
   return stripped;
 }
@@ -402,11 +541,15 @@ export function guardReply(
  * fallback genérico sino `stripContactName`: se entrega el contenido sin el
  * nombre (lección de `run_pk41`: el fallback borró contenido válido y el juez
  * lo marcó grave). Una violación de hechos sigue mandando al fallback.
+ *
+ * T005: `context` es REQUERIDO. Omitirlo desactivaba `stripContactName` en
+ * silencio (sin `contactName` no hay nada que recortar), y el único llamador
+ * —`pipeline.ts`— siempre lo tiene a mano.
  */
 export function resolveUncorrectedReply(
   original: string,
   violations: GuardViolation[],
-  context?: GuardContext
+  context: GuardContext
 ): string {
   const styleOnly = violations.every(
     (v) =>
@@ -416,7 +559,7 @@ export function resolveUncorrectedReply(
   );
   if (!styleOnly) return SAFE_FALLBACK_REPLY;
   if (violations.some((v) => v.kind === "nombre_repetido")) {
-    return stripContactName(original, context?.contactName);
+    return stripContactName(original, context.contactName);
   }
   return original;
 }

@@ -258,4 +258,31 @@ describe("pipeline: guard determinista de la respuesta (F5)", () => {
     expect(deliveredText()).not.toBe(SAFE_FALLBACK_REPLY);
     expect(call).toBe(3);
   });
+
+  it("nombre repetido con corrección exitosa → se entrega la corregida, sin strip (T005)", async () => {
+    responses.push(
+      { reply: "Roberto, con gusto le ayudo con su consulta." }, // segunda mención
+      { stage: "Nuevo" },
+      { reply: "Con gusto le ayudo con su consulta." } // corrección sin el nombre
+    );
+    pushSelects(
+      [
+        { id: "m1", direction: "in", text: "hola", createdAt: new Date(1) },
+        {
+          id: "m2",
+          direction: "out",
+          origin: "ai",
+          aiGenerated: true,
+          text: "Hola, Roberto. Somos el equipo comercial de Lamas Foods.",
+          createdAt: new Date(2),
+        },
+        { id: "m3", direction: "in", text: "cuánto sale?", createdAt: new Date(3) },
+      ],
+      [{ id: "ct_1", name: "Roberto Gonzalez" }]
+    );
+    const { runAgentTurn } = await import("@/server/ai/pipeline");
+    await runAgentTurn("cv_1");
+    expect(deliveredText()).toBe("Con gusto le ayudo con su consulta.");
+    expect(call).toBe(3);
+  });
 });
