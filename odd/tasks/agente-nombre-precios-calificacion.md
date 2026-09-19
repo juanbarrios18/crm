@@ -26,7 +26,8 @@ saliencia en cada vuelta.
 El dueño pidió extraer la conversación y aplicar el fix; el requisito es "el
 nombre una sola vez, no en cada vuelta". Un control probabilístico (solo
 prompt) no puede garantizar un "nunca". El guard determinista es agnóstico al
-modelo (PROD corre `google/gemini-2.5-flash-lite`).
+modelo. Nota 2026-09-19: el dueño cambió el modelo a `google/gemini-2.5-flash`
+(flash-lite fue el que produjo el fallo medido).
 
 ## Alcance autorizado
 
